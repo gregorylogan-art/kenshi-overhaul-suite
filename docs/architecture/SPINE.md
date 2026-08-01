@@ -114,3 +114,40 @@ Confirmed crashers: `Faction.platoonKillList`, `Faction:getActivePlatoons`.
 
 Each crash costs one restart and permanently buys one dangerous binding
 identified. A crash is a result, not a failure.
+
+---
+
+## SOLVED: the item mint→grant chain (2026-08-01)
+
+Reconstructed **entirely from argument errors** — the documented signatures were wrong at every step.
+
+```lua
+-- 1. reach the item database (VALIDATE the route; GameWorld.gamedata resolves
+--    but cannot answer queries)
+local container = character:getFaction():getData().sourceContainer
+
+-- 2. name an item.  CATEGORIES: 2=weapons  3=clothing/armour  4=food/materials
+local gd = container:getDataByName("Dried Fish", 4)
+
+-- 3. mint.  docs said createItem(levelOverride) -- actually:
+--    createItem(gameData, hand, gameData?, gameData?, LEVEL:number, Faction?)
+local item = getRootObjectFactory():createItem(gd, inv:getHandle(), nil, nil, 0, nil)
+--    NOTE: level 0 works for food; WEAPONS return nil at 0 -- try 0/1/-1/2.
+
+-- 4. grant.  docs said addItem(quantity, dropOnFail, destroyOnFail) -- actually:
+local ok = inv:addItem(item, 1, true, false)   -- false return = NO ROOM, not an error
+```
+
+### Stat IDs (enumerated live, 38 named stats)
+`Labouring=3` · `Swimming=23` · `Perception=24` · `Precision Shooting=36`
+Read with `stats:getStat(id, false)`, grant with `stats:xpStat_eventBased(id, amount)` — **confirmed visible in the Skills tab**.
+
+### Confirmed vanilla items
+`Dried Fish`(4) · `Raw Meat`(4) · `Iron Club`(2) · `Straw Hat`(3) · `Rag Loincloth`(3)
+`Sandals` does **not** exist under that name.
+
+### Additional crashers
+- `factory:process()` — **hard crash**. Engine internals (`process`/`mainThreadUpdate`/`update`/`run`) are banned; the generator blocklists them and hand-written probes must obey the same rules.
+
+### Reload hazard
+`dofile` re-registers handlers, leaving stale script copies running (observed as two divergent tallies and a fixed bug resurfacing). Scripts must track handler ids and unregister before re-registering.
