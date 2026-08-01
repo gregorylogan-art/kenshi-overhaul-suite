@@ -40,11 +40,16 @@ local CFG = {
     -- vanilla Kenshi, so it double-fires. 34 = G, which vanilla appears to
     -- leave free. Change here if it collides; the keycode logger finds codes.
     fishKey     = 34,    -- G
-    castSeconds = 3.0,
-    -- A cast should nearly always produce SOMETHING (Greg, v1). Empty pulls are
-    -- a rare anomaly, not the common case -- junk is the low-skill outcome, not
-    -- nothing. 1% keeps the occasional "line came back empty" moment alive.
-    nothingChance = 0.01,
+    castSeconds = 5.0,   -- Greg v1.1: 3s felt too quick for a deliberate act
+
+    -- OUTCOME TABLE (Greg v1.1). Junk dominates deliberately: fishing must not
+    -- be a cheap money loop, so the common result is worthless trash and fish
+    -- are the payoff. Skill will later shift junk->fish (issue #14).
+    --   5%  nothing   80%  junk   15%  fish
+    -- Cumulative thresholds on ONE roll, so the numbers here are literally the
+    -- probabilities -- no compounding to reason about.
+    pctNothing = 0.05,
+    pctJunk    = 0.80,   -- fish is the remainder (0.15)
     -- Standstill radius (squared, world units). Kenshi world units are large;
     -- ~2.5 units of drift is generous enough to survive idle sway but cancels
     -- on a real walk. Tune from the "cast broken -- you moved" logs.
@@ -190,11 +195,12 @@ local JUNK_CANDIDATES = {
 local JUNK_POOL = nil   -- built on first use from what actually resolves
 
 function Fishing.tryCatch(character)
-    -- Rare empty pull first, then the real split: fish vs junk.
-    if roll() < CFG.nothingChance then
+    -- One roll against cumulative bands: 5% nothing | 80% junk | 15% fish.
+    local r = roll()
+    if r < CFG.pctNothing then
         return false, nil, false
     end
-    if roll() < CFG.garbageOdds then
+    if r < CFG.pctNothing + CFG.pctJunk then
         -- Build the pool once, keeping only names that genuinely resolve, so a
         -- bad guess degrades to "fewer junk types" instead of a failed grant.
         if not JUNK_POOL then
