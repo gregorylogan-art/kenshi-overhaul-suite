@@ -107,13 +107,7 @@ return {
       { name = "getCharacterHeightSpeedMultiplier", ret = "number" },
     },
     fields = {
-      { name = "slots", ty = "const boost::unordered::unordered_map<std::string, AttachmentData*, boost::hash<std::string >, std::equal_to<std::string >, Ogre::STLAllocator<std::pair<std::string const, AttachmentData*>, Ogre::GeneralAllocPolicy > >*", rw = "R" },
-      { name = "attachedObjects", ty = "boost::unordered::unordered_map<std::string, AttachedEntity*, boost::hash<std::string >, std::equal_to<std::string >, Ogre::STLAllocator<std::pair<std::string const, AttachedEntity*>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "attachedHarpoons", ty = "Ogre::FastArray<Harpoon*>", rw = "R" },
       { name = "msgClearHarpoons", ty = "boolean", rw = "RW" },
-      { name = "attachedEffects", ty = "Ogre::FastArray<AttachedEffect*>", rw = "R" },
-      { name = "attachedEffectsToRemove", ty = "Ogre::FastArray<AttachedEffect*>", rw = "R" },
-      { name = "woundsList", ty = "Ogre::FastArray<Wound*>", rw = "R" },
       { name = "woundsListMutex", ty = "unknown", rw = "R" },
       { name = "body", ty = "Ogre::Entity*", rw = "R" },
       { name = "bodyLoader", ty = "Ogre::Entity*", rw = "R" },
@@ -190,8 +184,6 @@ return {
       { name = "fistInjuryMult", ty = "number", rw = "RW" },
       { name = "weatherProtectionAmount", ty = "number", rw = "RW" },
       { name = "rangedSkillMult", ty = "number", rw = "RW" },
-      { name = "weatherProtections", ty = "std::set<WeatherAffecting, std::less<WeatherAffecting>, Ogre::STLAllocator<WeatherAffecting, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "bodypartCoverage", ty = "ogre_unordered_map<GameData*, float>::type", rw = "R" },
       { name = "craftTime", ty = "number", rw = "RW" },
     },
   },
@@ -433,7 +425,6 @@ return {
       { name = "getReplacement", ret = "void" },
     },
     fields = {
-      { name = "toReplace", ty = "ogre_unordered_set<GameData*>::type", rw = "RW" },
       { name = "replaceWith", ty = "FitnessSelector<GameData*>", rw = "RW" },
     },
   },
@@ -1075,11 +1066,6 @@ return {
       { name = "BLOCKING_MEI_DISTANCE_MAX", ty = "number", rw = "RW" },
       { name = "currentTarget", ty = "Character", rw = "RW" },
       { name = "blockingTargetH", ty = "hand", rw = "RW" },
-      { name = "targetsInAttackZone", ty = "lektor<hand>", rw = "RW" },
-      { name = "attackersH", ty = "lektor<hand>", rw = "RW" },
-      { name = "threats", ty = "lektor<Character*>", rw = "RW" },
-      { name = "threatsH", ty = "lektor<hand>", rw = "RW" },
-      { name = "notifiedThreats", ty = "lektor<hand>", rw = "RW" },
       { name = "currentTargetHandle", ty = "hand", rw = "RW" },
       { name = "stateMap", ty = "SwordStateMapBinding::MapType", rw = "RW" },
     },
@@ -1149,7 +1135,6 @@ return {
       { name = "maxTargetHits", ty = "integer", rw = "RW" },
       { name = "events", ty = "unknown", rw = "R" },
       { name = "skillTypes", ty = "unknown", rw = "R" },
-      { name = "impactPoints", ty = "lektor<CombatTechniqueData::ImpactPoint>", rw = "R" },
     },
   },
   ["ConstructionState"] = {
@@ -1200,7 +1185,6 @@ return {
       { name = "combatSpeedMult", ty = "number", rw = "RW" },
       { name = "combatSkillBonus", ty = "integer", rw = "RW" },
       { name = "stealthMult", ty = "number", rw = "RW" },
-      { name = "racesExclude", ty = "ogre_unordered_set<GameData*>::type", rw = "R" },
       { name = "inventory", ty = "Inventory", rw = "R" },
     },
   },
@@ -1239,7 +1223,6 @@ return {
     },
     fields = {
       { name = "maxCraftLevel", ty = "integer", rw = "RW" },
-      { name = "crafting", ty = "std::deque<CraftingItem, std::allocator<CraftingItem> >", rw = "R" },
       { name = "specialCraftItemType", ty = "integer", rw = "RW" },
       { name = "repeat", ty = "boolean", rw = "RW" },
       { name = "whosCrafting", ty = "hand", rw = "RW" },
@@ -1248,7 +1231,6 @@ return {
       { name = "biggestCraftableItem", ty = "GameData", rw = "R" },
       { name = "outItem", ty = "Item", rw = "R" },
       { name = "inItems", ty = "Item", rw = "R" },
-      { name = "partialItems", ty = "ogre_unordered_map<GameData*, float>::type", rw = "R" },
     },
   },
   ["CraftingInventoryLayout"] = {
@@ -1497,11 +1479,6 @@ return {
       { name = "value", ty = "integer", rw = "RW" },
     },
   },
-  ["DialogChoiceList"] = {
-    fields = {
-      { name = "conversationChoices", ty = "lektor<DialogLineData*>", rw = "RW" },
-    },
-  },
   ["DialogCondition"] = {
     fields = {
       { name = "key", ty = "integer", rw = "RW" },
@@ -1528,9 +1505,6 @@ return {
       { name = "personalityNeeded", ty = "integer", rw = "RW" },
       { name = "personalityNotWanted", ty = "integer", rw = "RW" },
       { name = "campaignTriggers", ty = "FitnessSelector<CampaignTriggerData*>", rw = "RW" },
-      { name = "isTargetRace", ty = "lektor<GameData*>", rw = "RW" },
-      { name = "isTargetSubRace_specificallyTheTarget", ty = "lektor<GameData*>", rw = "RW" },
-      { name = "givesItem", ty = "lektor<GameDataValuePair>", rw = "RW" },
       { name = "inTownOf", ty = "Faction", rw = "R" },
       { name = "isTargetFaction", ty = "Faction", rw = "R" },
       { name = "isMyFaction", ty = "Faction", rw = "R" },
@@ -1540,15 +1514,12 @@ return {
       { name = "isMyRace", ty = "GameData", rw = "RW" },
       { name = "isMySubRace", ty = "GameData", rw = "RW" },
       { name = "hasItemType", ty = "integer", rw = "RW" },
-      { name = "hasItem", ty = "lektor<GameData*>", rw = "RW" },
       { name = "worldState", ty = "lightuserdata", rw = "RW" },
       { name = "data", ty = "GameData", rw = "RW" },
       { name = "onceOnly", ty = "boolean", rw = "RW" },
       { name = "isMonologue", ty = "boolean", rw = "RW" },
       { name = "forCertainType", ty = "integer", rw = "RW" },
       { name = "children", ty = "DialogChoiceList", rw = "RW" },
-      { name = "conditions", ty = "lektor<DialogLineData::DialogCondition*>", rw = "RW" },
-      { name = "actions", ty = "lektor<DialogLineData::DialogAction*>", rw = "RW" },
       { name = "lineCount", ty = "integer", rw = "RW" },
       { name = "texts", ty = "string", rw = "RW" },
       { name = "parent", ty = "DialogLineData", rw = "RW" },
@@ -1561,9 +1532,6 @@ return {
       { name = "score", ty = "integer", rw = "RW" },
       { name = "oneAtATime", ty = "boolean", rw = "RW" },
       { name = "isLocked", ty = "boolean", rw = "RW" },
-      { name = "locks", ty = "lektor<DialogLineData*>", rw = "RW" },
-      { name = "unlocks_lockMe", ty = "lektor<DialogLineData*>", rw = "RW" },
-      { name = "unlocks_dontLockMe", ty = "lektor<DialogLineData*>", rw = "RW" },
       { name = "crowdTrigger", ty = "DialogLineData", rw = "RW" },
       { name = "factionRelationEffects", ty = "unknown", rw = "RW" },
       { name = "playerInterruptionDialog", ty = "DialogLineData", rw = "RW" },
@@ -1591,14 +1559,8 @@ return {
     fields = {
       { name = "repCounter", ty = "RepetitionCounter", rw = "RW" },
       { name = "_needsDynamicAssessments", ty = "boolean", rw = "RW" },
-      { name = "locked", ty = "std::map<DialogLineData*, bool, std::less<DialogLineData*>, Ogre::STLAllocator<std::pair<DialogLineData*const, bool>, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "sayMsg", ty = "string", rw = "RW" },
-      { name = "threadMessages", ty = "Ogre::vector<Dialogue::DT_MSG>::type", rw = "R" },
-      { name = "pacakgesIHave", ty = "std::set<GameData*, std::less<GameData*>, Ogre::STLAllocator<GameData*, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "playerInterruptionDialog", ty = "DialogLineData*", rw = "R" },
-      { name = "eventRepeatTimers", ty = "std::map<EventTriggerEnum, float, std::less<EventTriggerEnum>, Ogre::STLAllocator<std::pair<EventTriggerEnum const, float>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "eventDeliveredStates", ty = "std::map<EventTriggerEnum, hand, std::less<EventTriggerEnum>, Ogre::STLAllocator<std::pair<EventTriggerEnum const, hand>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "_hasChanceLines", ty = "std::map<DialogLineData*, bool, std::less<DialogLineData*>, Ogre::STLAllocator<std::pair<DialogLineData*const, bool>, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "_hasEnded", ty = "boolean", rw = "RW" },
       { name = "shouting", ty = "boolean", rw = "RW" },
       { name = "staysOnScreen", ty = "boolean", rw = "RW" },
@@ -1609,15 +1571,12 @@ return {
       { name = "currentConversationType", ty = "integer", rw = "RW" },
       { name = "currentConversation", ty = "DialogLineData*", rw = "R" },
       { name = "currentLine", ty = "DialogLineData*", rw = "R" },
-      { name = "conversationsMain", ty = "std::map<EventTriggerEnum, DialogChoiceList*, std::less<EventTriggerEnum>, Ogre::STLAllocator<std::pair<EventTriggerEnum const, DialogChoiceList*>, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "interjector1", ty = "hand", rw = "RW" },
       { name = "interjector2", ty = "hand", rw = "RW" },
       { name = "interjector3", ty = "hand", rw = "RW" },
       { name = "speechBubblePanel", ty = "DialogueSpeechBubble*", rw = "R" },
       { name = "speechTextTimer", ty = "number", rw = "RW" },
       { name = "speechTextTimer_forced", ty = "number", rw = "RW" },
-      { name = "replyIds", ty = "Ogre::vector<std::string>::type", rw = "R" },
-      { name = "responses", ty = "Ogre::vector<std::string>::type", rw = "R" },
       { name = "npcReplyText", ty = "string", rw = "RW" },
       { name = "conversationMaster", ty = "hand", rw = "RW" },
       { name = "waitingForReplyFrom", ty = "hand", rw = "RW" },
@@ -1633,7 +1592,6 @@ return {
       { name = "marginW", ty = "integer", rw = "RW" },
       { name = "marginH", ty = "integer", rw = "RW" },
       { name = "textBox", ty = "integer", rw = "R" },
-      { name = "baseSize", ty = "MyGUI::types::TSize<int>", rw = "R" },
     },
   },
   ["DialogueWindow"] = {
@@ -1723,7 +1681,6 @@ return {
     fields = {
       { name = "_antiSlavery", ty = "boolean", rw = "RW" },
       { name = "characteristicsData", ty = "lightuserdata", rw = "RW" },
-      { name = "ranks", ty = "lektor<std::string>", rw = "RW" },
       { name = "allowSlavesWeapons", ty = "boolean", rw = "RW" },
       { name = "fundamentalNPCType", ty = "integer", rw = "RW" },
       { name = "myLawEnforcementFaction", ty = "Faction", rw = "RW" },
@@ -1738,10 +1695,6 @@ return {
       { name = "name", ty = "string", rw = "RW" },
       { name = "notARealFaction", ty = "boolean", rw = "RW" },
       { name = "roadPreference", ty = "number", rw = "RW" },
-      { name = "platoonKillList", ty = "lektor<Platoon*>", rw = "RW" },
-      { name = "platoonRemoveList", ty = "lektor<Platoon*>", rw = "RW" },
-      { name = "activePlatoons", ty = "lektor<Platoon*>", rw = "RW" },
-      { name = "unloadedPlatoons", ty = "lektor<Platoon*>", rw = "RW" },
       { name = "periodicUpdateCounter_active", ty = "integer", rw = "RW" },
       { name = "periodicUpdateCounter_unloaded", ty = "integer", rw = "RW" },
       { name = "data", ty = "GameData", rw = "RW" },
@@ -1752,7 +1705,6 @@ return {
       { name = "platoonIDs", ty = "integer", rw = "RW" },
       { name = "p_TIME", ty = "number", rw = "RW" },
       { name = "platoonPeriodicUpdateIndex", ty = "integer", rw = "RW" },
-      { name = "buildingSwaps", ty = "lektor<Faction::BuildingSwaps>", rw = "RW" },
     },
   },
   ["FactionLeader"] = {
@@ -1762,7 +1714,6 @@ return {
     fields = {
       { name = "faction", ty = "Faction", rw = "RW" },
       { name = "worstEnemy", ty = "Faction", rw = "RW" },
-      { name = "biomeTerritory", ty = "lektor<GameData*>", rw = "RW" },
     },
   },
   ["FactionManager"] = {
@@ -1774,8 +1725,6 @@ return {
     },
     fields = {
       { name = "addListMuto", ty = "lightuserdata", rw = "R" },
-      { name = "participants", ty = "lektor<Faction*>", rw = "RW" },
-      { name = "toAddList", ty = "lektor<Platoon*>", rw = "RW" },
     },
   },
   ["FactionRelations"] = {
@@ -1830,8 +1779,6 @@ return {
       { name = "me", ty = "Faction", rw = "RW" },
       { name = "lastID", ty = "integer", rw = "RW" },
       { name = "nextUpdateTime", ty = "TimeOfDay", rw = "RW" },
-      { name = "myTowns", ty = "lektor<TownBase*>", rw = "RW" },
-      { name = "hiredForces", ty = "lektor<hand>", rw = "RW" },
       { name = "activeCampaigns", ty = "lightuserdata", rw = "RW" },
       { name = "biomeTerritories", ty = "lightuserdata", rw = "RW" },
       { name = "biomeNoGoZones", ty = "lightuserdata", rw = "RW" },
@@ -1857,13 +1804,10 @@ return {
   },
   ["FarmBatch"] = {
     fields = {
-      { name = "plantSource", ty = "lektor<FarmBuilding::PlantSource*>", rw = "R" },
-      { name = "plantGroups", ty = "lektor<int>", rw = "R" },
       { name = "geometry", ty = "Ogre::SharedPtr<Ogre::Mesh>", rw = "R" },
       { name = "height", ty = "number", rw = "RW" },
       { name = "size", ty = "integer", rw = "RW" },
       { name = "meshesLoaded", ty = "integer", rw = "RW" },
-      { name = "farms", ty = "lektor<FarmBuilding*>", rw = "R" },
     },
   },
   ["FarmBuilding"] = {
@@ -1873,10 +1817,8 @@ return {
       { name = "isCropsEdible", ret = "boolean" },
     },
     fields = {
-      { name = "cropMultipliers", ty = "ogre_unordered_map<CropType, float>::type", rw = "R" },
       { name = "material", ty = "Ogre::SharedPtr<Ogre::Material>", rw = "R" },
       { name = "plantEntity", ty = "lightuserdata", rw = "R" },
-      { name = "plants", ty = "lektor<FarmBuilding::Plant>", rw = "R" },
       { name = "clickHull", ty = "lightuserdata", rw = "R" },
       { name = "batch", ty = "lightuserdata", rw = "R" },
       { name = "lastUpdated", ty = "number", rw = "RW" },
@@ -2078,11 +2020,6 @@ return {
     },
     fields = {
       { name = "currentID", ty = "integer", rw = "RW" },
-      { name = "gamedataCatName", ty = "boost::unordered::unordered_map<int, boost::unordered::unordered_map<std::string, GameData*, boost::hash<std::string >, std::equal_to<std::string >, Ogre::STLAllocator<std::pair<std::string const, GameData*>, Ogre::GeneralAllocPolicy > >, boost::hash<int>, std::equal_to<int>, Ogre::STLAllocator<std::pair<int const, boost::unordered::unordered_map<std::string, GameData*, boost::hash<std::string >, std::equal_to<std::string >, Ogre::STLAllocator<std::pair<std::string const, GameData*>, Ogre::GeneralAllocPolicy > > >, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "gamedataID", ty = "ogre_unordered_map<int, GameData*>::type", rw = "R" },
-      { name = "gamedataCatSID", ty = "boost::unordered::unordered_map<int, boost::unordered::unordered_map<std::string, GameData*, boost::hash<std::string >, std::equal_to<std::string >, Ogre::STLAllocator<std::pair<std::string const, GameData*>, Ogre::GeneralAllocPolicy > >, boost::hash<int>, std::equal_to<int>, Ogre::STLAllocator<std::pair<int const, boost::unordered::unordered_map<std::string, GameData*, boost::hash<std::string >, std::equal_to<std::string >, Ogre::STLAllocator<std::pair<std::string const, GameData*>, Ogre::GeneralAllocPolicy > > >, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "gamedataSID", ty = "boost::unordered::unordered_map<std::string, GameData*, boost::hash<std::string >, std::equal_to<std::string >, Ogre::STLAllocator<std::pair<std::string const, GameData*>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "mainList", ty = "ogre_unordered_set<GameData*>::type", rw = "R" },
       { name = "name", ty = "string", rw = "RW" },
       { name = "isBaseDatafile", ty = "boolean", rw = "RW" },
       { name = "readOnly", ty = "boolean", rw = "RW" },
@@ -2106,8 +2043,6 @@ return {
       { name = "author", ty = "string", rw = "RW" },
       { name = "version", ty = "integer", rw = "RW" },
       { name = "description", ty = "string", rw = "RW" },
-      { name = "dependencies", ty = "lektor<std::string >", rw = "R" },
-      { name = "references", ty = "lektor<std::string >", rw = "R" },
     },
   },
   ["GameDataReference"] = {
@@ -2168,30 +2103,14 @@ return {
       { name = "messageRoller", ty = "MessageRoller*", rw = "R" },
       { name = "ogreLogger", ty = "Ogre::Log*", rw = "R" },
       { name = "steamEnabled", ty = "boolean", rw = "RW" },
-      { name = "baseMods", ty = "lektor<ModInfo>", rw = "R" },
-      { name = "baseModsNames", ty = "lektor<std::string>", rw = "R" },
-      { name = "activeMods", ty = "lektor<ModInfo*>", rw = "R" },
-      { name = "availableModsByName", ty = "std::map<std::string, ModInfo, std::less<std::string >, Ogre::STLAllocator<std::pair<std::string const, ModInfo>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "availabelModsOrderedList", ty = "lektor<ModInfo*>", rw = "R" },
       { name = "player", ty = "PlayerInterface", rw = "R" },
-      { name = "charactersWithLights", ty = "ogre_unordered_set<Character*>::type", rw = "R" },
-      { name = "sysMessageList", ty = "std::list<GameWorld::SysMessage, Ogre::STLAllocator<GameWorld::SysMessage, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "updatePortraitsMap", ty = "unknown", rw = "R" },
-      { name = "dynamicDestroyBuildingsList", ty = "lektor<hand>", rw = "R" },
-      { name = "destroyListAE", ty = "ogre_unordered_set<AttachedEntity*>::type", rw = "R" },
-      { name = "destroyListOE", ty = "ogre_unordered_set<Ogre::MovableObject*>::type", rw = "R" },
-      { name = "destroyListTBM", ty = "ogre_unordered_set<TownBuildingsManager*>::type", rw = "R" },
       { name = "frameSpeedMult", ty = "number", rw = "RW" },
       { name = "deathParade", ty = "unknown", rw = "R" },
       { name = "deathParadeWasMeddledWith", ty = "boolean", rw = "RW" },
       { name = "charUpdateListMain_inUse", ty = "boolean", rw = "RW" },
-      { name = "charUpdateListMain", ty = "ogre_unordered_set<Character*>::type", rw = "R" },
       { name = "_AINonRenderThread", ty = "RenderTimeBackthread*", rw = "R" },
-      { name = "nestBatcherKillList", ty = "std::deque<NestBatcher*, Ogre::STLAllocator<NestBatcher*, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "killListPhase0", ty = "ogre_unordered_set<RootObject*>::type", rw = "R" },
       { name = "killListPhase1", ty = "unknown", rw = "R" },
-      { name = "killListPhase2", ty = "std::deque<RootObject*, Ogre::STLAllocator<RootObject*, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "mainUpdateListRemovalQueue", ty = "lektor<Character*>", rw = "R" },
       { name = "timeStamper", ty = "SimpleTimeStamper", rw = "R" },
       { name = "zoneMgr", ty = "ZoneManager", rw = "R" },
       { name = "debugFlag", ty = "boolean", rw = "RW" },
@@ -2204,7 +2123,6 @@ return {
     fields = {
       { name = "win", ty = "MyGUI::Widget", rw = "R" },
       { name = "list", ty = "MyGUI::Widget", rw = "R" },
-      { name = "items", ty = "lektor<GameData*>", rw = "R" },
       { name = "levelEditor", ty = "LevelEditor", rw = "R" },
       { name = "lastItem", ty = "integer", rw = "RW" },
     },
@@ -2365,11 +2283,6 @@ return {
       { name = "fogDistMin", ty = "number", rw = "RW" },
     },
   },
-  ["HasRoomCache"] = {
-    fields = {
-      { name = "itemStates", ty = "std::map<GameData*, bool, std::less<GameData*>, std::allocator<std::pair<GameData*const, bool> > >", rw = "R" },
-    },
-  },
   ["HealthPartStatus"] = {
     methods = {
       { name = "isRobotic", ret = "boolean" },
@@ -2418,12 +2331,7 @@ return {
   },
   ["InputHandler"] = {
     fields = {
-      { name = "commands", ty = "std::map<std::string, Command, std::less<std::string >, Ogre::STLAllocator<std::pair<std::string const, Command>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "map", ty = "std::map<int, Command*, std::less<int>, Ogre::STLAllocator<std::pair<int const, Command*>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "editMap", ty = "std::map<int, Command*, std::less<int>, Ogre::STLAllocator<std::pair<int const, Command*>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "events", ty = "std::set<Command*, std::less<Command*>, Ogre::STLAllocator<Command*, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "keyboard", ty = "integer", rw = "R" },
-      { name = "keyNameMap", ty = "std::map<std::string, int, std::less<std::string >, Ogre::STLAllocator<std::pair<std::string const, int>, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "controlEnabled", ty = "boolean", rw = "RW" },
       { name = "gameMode", ty = "integer", rw = "RW" },
       { name = "ctrl", ty = "boolean", rw = "RW" },
@@ -2527,9 +2435,7 @@ return {
     },
     fields = {
       { name = "hasRoomCache", ty = "Inventory::HasRoomCache", rw = "RW" },
-      { name = "_allItems", ty = "lektor<Item*>", rw = "R" },
       { name = "sections", ty = "InventorySection", rw = "R" },
-      { name = "sectionsInSearchOrder", ty = "lektor<InventorySection*>", rw = "R" },
       { name = "callbackObject", ty = "RootObject", rw = "RW" },
       { name = "owner", ty = "RootObject", rw = "RW" },
       { name = "totalWeight", ty = "number", rw = "RW" },
@@ -2637,11 +2543,9 @@ return {
       { name = "width", ty = "integer", rw = "RW" },
       { name = "height", ty = "integer", rw = "RW" },
       { name = "armourOnly", ty = "boolean", rw = "RW" },
-      { name = "items", ty = "Ogre::vector<InventorySection::SectionItem>::type", rw = "R" },
       { name = "content", ty = "Array2d<Item>", rw = "R" },
       { name = "stackingBonusMin", ty = "integer", rw = "RW" },
       { name = "stackingBonusMult", ty = "number", rw = "RW" },
-      { name = "veryLimitedSlot", ty = "lektor<GameData*>", rw = "R" },
       { name = "itemsLimit", ty = "integer", rw = "RW" },
       { name = "weightMultiplier", ty = "number", rw = "RW" },
       { name = "totalWeight", ty = "number", rw = "RW" },
@@ -2779,12 +2683,6 @@ return {
   ["LimbsInventoryLayout"] = {
     fields = {
       { name = "character", ty = "Character", rw = "RW" },
-    },
-  },
-  ["Limiter"] = {
-    fields = {
-      { name = "racesExclude", ty = "std::set<RaceData*, std::less<RaceData*>, Ogre::STLAllocator<RaceData*, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "racesInclude", ty = "std::set<RaceData*, std::less<RaceData*>, Ogre::STLAllocator<RaceData*, Ogre::GeneralAllocPolicy > >", rw = "R" },
     },
   },
   ["ListScrollBar"] = {
@@ -2967,7 +2865,6 @@ return {
       { name = "isPositionsFilter", ty = "boolean", rw = "RW" },
       { name = "edgeSkips", ty = "integer", rw = "RW" },
       { name = "maxLength", ty = "integer", rw = "RW" },
-      { name = "mHistoryBufferX", ty = "std::deque<float, std::allocator<float> >", rw = "R" },
     },
   },
   ["MedianFilter2DVector"] = {
@@ -3006,7 +2903,6 @@ return {
     },
     fields = {
       { name = "status", ty = "unknown", rw = "RW" },
-      { name = "armourList", ty = "lektor<Armour*>", rw = "RW" },
       { name = "hunger", ty = "number", rw = "RW" },
       { name = "fed", ty = "number", rw = "RW" },
       { name = "lastPeriodicUpdate", ty = "TimeOfDay", rw = "RW" },
@@ -3045,13 +2941,11 @@ return {
       { name = "rightArmOk", ty = "boolean", rw = "RW" },
       { name = "leftArmOk", ty = "boolean", rw = "RW" },
       { name = "lastBloodPosition", ty = "Vector3", rw = "RW" },
-      { name = "anatomy", ty = "lektor<MedicalSystem::HealthPartStatus*>", rw = "RW" },
       { name = "stats", ty = "CharStats", rw = "RW" },
     },
   },
   ["MeshDataLookup"] = {
     fields = {
-      { name = "boneAssignments", ty = "boost::unordered::unordered_map<Ogre::IdString, lektor<lektor<int> >, boost::hash<Ogre::IdString>, std::equal_to<Ogre::IdString>, Ogre::STLAllocator<std::pair<Ogre::IdString const, lektor<lektor<int> > >, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "vertCount", ty = "unsigned __int64", rw = "R" },
       { name = "verts", ty = "Ogre::Vector3*", rw = "R" },
       { name = "uvs", ty = "Ogre::Vector2*", rw = "R" },
@@ -3078,7 +2972,6 @@ return {
   ["MotionFilter"] = {
     fields = {
       { name = "mWeightModifier", ty = "number", rw = "RW" },
-      { name = "mHistoryBufferX", ty = "std::deque<float, std::allocator<float> >", rw = "R" },
     },
   },
   ["MultiSlider"] = {
@@ -3143,7 +3036,6 @@ return {
       { name = "refID", ty = "string", rw = "RW" },
       { name = "created", ty = "integer", rw = "RW" },
       { name = "modified", ty = "integer", rw = "RW" },
-      { name = "stateIDs", ty = "lektor<std::string >", rw = "R" },
     },
   },
   ["OpenSaveFileDialog"] = {
@@ -3211,7 +3103,6 @@ return {
       { name = "ddsTextureMipMapGimping", ty = "integer", rw = "RW" },
       { name = "reflectionMode", ty = "integer", rw = "RW" },
       { name = "reflectionDistance", ty = "number", rw = "RW" },
-      { name = "compositors", ty = "lektor<std::pair<std::string, bool> >", rw = "R" },
       { name = "musicVolume", ty = "number", rw = "RW" },
       { name = "ambientVolume", ty = "number", rw = "RW" },
       { name = "footstepVolume", ty = "number", rw = "RW" },
@@ -3289,10 +3180,8 @@ return {
       { name = "getOccupiedTownFaction", ret = "Faction" },
     },
     fields = {
-      { name = "slaves", ty = "std::set<hand, std::less<hand>, Ogre::STLAllocator<hand, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "_homeTown", ty = "TownBase*", rw = "R" },
       { name = "_homeBuilding", ty = "hand", rw = "RW" },
-      { name = "stuff", ty = "lektor<hand>", rw = "R" },
       { name = "faction", ty = "Faction", rw = "R" },
       { name = "me", ty = "Platoon", rw = "R" },
       { name = "occupiedTown", ty = "TownBase*", rw = "R" },
@@ -3398,8 +3287,6 @@ return {
       { name = "selectedCharacter", ty = "hand", rw = "RW" },
       { name = "aiOptions", ty = "PlayerInterface::AIOptions", rw = "RW" },
       { name = "zonesVisibilities", ty = "unknown", rw = "RW" },
-      { name = "townsActive", ty = "ogre_unordered_set<TownBase*>::type", rw = "RW" },
-      { name = "interiorsVisible", ty = "ogre_unordered_set<hand>::type", rw = "RW" },
       { name = "interiorsVisibleHash", ty = "integer", rw = "RW" },
       { name = "currentFloor", ty = "integer", rw = "RW" },
       { name = "currentMouseTask", ty = "integer", rw = "RW" },
@@ -3407,7 +3294,6 @@ return {
       { name = "mouseRightTargetSet", ty = "boolean", rw = "RW" },
       { name = "mouseRightTarget", ty = "RootObject", rw = "RW" },
       { name = "rmouseTimer", ty = "number", rw = "RW" },
-      { name = "selectedCharacters", ty = "ogre_unordered_set<hand>::type", rw = "RW" },
       { name = "selectedObject", ty = "hand", rw = "RW" },
       { name = "onlyAnimalsSelected", ty = "boolean", rw = "RW" },
       { name = "selectedLoadedLeft", ty = "integer", rw = "RW" },
@@ -3416,7 +3302,6 @@ return {
       { name = "levelEditor", ty = "lightuserdata", rw = "RW" },
       { name = "participant", ty = "Faction", rw = "RW" },
       { name = "currentPlatoon", ty = "Platoon", rw = "RW" },
-      { name = "playerCharacters", ty = "lektor<Character*>", rw = "RW" },
       { name = "deadPlayerSquad", ty = "hand", rw = "RW" },
       { name = "placementObject", ty = "lightuserdata", rw = "RW" },
       { name = "characterEditorMode", ty = "boolean", rw = "RW" },
@@ -3567,7 +3452,6 @@ return {
       { name = "productionState", ty = "integer", rw = "RW" },
       { name = "_resourceMiningLevel", ty = "number", rw = "RW" },
       { name = "outSection", ty = "InventorySection", rw = "R" },
-      { name = "consumptionItems", ty = "lektor<StorageBuilding::ConsumptionItem>", rw = "R" },
     },
   },
   ["ProgressBarWidget"] = {
@@ -3606,7 +3490,6 @@ return {
   },
   ["RaceData"] = {
     fields = {
-      { name = "specialFoods", ty = "ogre_unordered_set<GameData*>::type", rw = "R" },
       { name = "data", ty = "GameData", rw = "R" },
       { name = "runSpeedMaxSkill", ty = "number", rw = "RW" },
       { name = "runSpeedMinSkill", ty = "number", rw = "RW" },
@@ -3633,14 +3516,7 @@ return {
       { name = "firstAidSkill", ty = "integer", rw = "RW" },
       { name = "bloodColour", ty = "Ogre::ColourValue", rw = "R" },
       { name = "canGoIndoors", ty = "boolean", rw = "RW" },
-      { name = "statMods", ty = "ogre_unordered_map<StatsEnumerated, float>::type", rw = "R" },
-      { name = "weatherImmunities", ty = "ogre_unordered_set<WeatherAffecting>::type", rw = "R" },
       { name = "raceGroup", ty = "RaceGroupData*", rw = "R" },
-    },
-  },
-  ["RaceLimiter"] = {
-    fields = {
-      { name = "limits", ty = "ogre_unordered_map<GameData*, RaceLimiter::Limiter>::type", rw = "R" },
     },
   },
   ["RainCollectorBuilding"] = {
@@ -3664,11 +3540,6 @@ return {
   ["ReorderableList"] = {
     fields = {
       { name = "data", ty = "lightuserdata", rw = "R" },
-    },
-  },
-  ["RepetitionCounter"] = {
-    fields = {
-      { name = "states", ty = "std::map<EventTriggerEnum, Dialogue::RepetitionCounter::DialogState, std::less<EventTriggerEnum>, Ogre::STLAllocator<std::pair<EventTriggerEnum const, Dialogue::RepetitionCounter::DialogState>, Ogre::GeneralAllocPolicy > >", rw = "R" },
     },
   },
   ["ResearchBuilding"] = {
@@ -3788,14 +3659,10 @@ return {
       { name = "getNumThings", ret = "integer" },
       { name = "getThings", ret = "lektor<RootObject*>" },
     },
-    fields = {
-      { name = "things", ty = "lektor<RootObject*>", rw = "R" },
-    },
   },
   ["RootObjectFactory"] = {
     fields = {
       { name = "todoMutex", ty = "unknown", rw = "R" },
-      { name = "todoList", ty = "std::deque<RootObjectFactory::CreatelistItem*, std::allocator<RootObjectFactory::CreatelistItem*> >", rw = "R" },
     },
   },
   ["SaveFileSystem"] = {
@@ -3898,8 +3765,6 @@ return {
       { name = "getCharacter", ret = "Character" },
     },
     fields = {
-      { name = "it", ty = "boost::unordered::iterator_detail::c_iterator<boost::unordered::detail::ptr_node<std::pair<hand const, SeenSomeone*> > >", rw = "R" },
-      { name = "_end", ty = "boost::unordered::iterator_detail::c_iterator<boost::unordered::detail::ptr_node<std::pair<hand const, SeenSomeone*> > >", rw = "R" },
       { name = "flagsAny", ty = "integer", rw = "RW" },
       { name = "flagsNot", ty = "integer", rw = "RW" },
     },
@@ -3965,7 +3830,6 @@ return {
   },
   ["ShopTraderInventory"] = {
     fields = {
-      { name = "inventories", ty = "ogre_unordered_map<hand, InventorySection*>::type", rw = "R" },
       { name = "section", ty = "lightuserdata", rw = "R" },
     },
   },
@@ -3994,7 +3858,6 @@ return {
   },
   ["SpeedGroup"] = {
     fields = {
-      { name = "members", ty = "ogre_unordered_set<hand>::type", rw = "R" },
       { name = "position", ty = "Vector3", rw = "RW" },
       { name = "direction", ty = "Vector3", rw = "RW" },
       { name = "speed", ty = "number", rw = "RW" },
@@ -4019,11 +3882,6 @@ return {
       { name = "timeSoFar", ty = "number", rw = "RW" },
       { name = "timeLimitMax", ty = "number", rw = "RW" },
       { name = "stillSeen", ty = "boolean", rw = "RW" },
-    },
-  },
-  ["SpottingPeopleMgr"] = {
-    fields = {
-      { name = "spottedPeople", ty = "std::map<hand, SensoryData::SpottingPeopleMgr::Spot, std::less<hand>, Ogre::STLAllocator<std::pair<hand const, SensoryData::SpottingPeopleMgr::Spot>, Ogre::GeneralAllocPolicy > >", rw = "R" },
     },
   },
   ["SquadCellView"] = {
@@ -4099,7 +3957,6 @@ return {
       { name = "specialItemTypesOnly", ty = "integer", rw = "RW" },
       { name = "endOfTheLine", ty = "boolean", rw = "RW" },
       { name = "productionItem", ty = "lightuserdata", rw = "R" },
-      { name = "manyLimitItems", ty = "lektor<StorageBuilding::ConsumptionItem*>", rw = "R" },
     },
   },
   ["StringPair"] = {
@@ -4321,11 +4178,8 @@ return {
       { name = "openToPublic", ty = "boolean", rw = "RW" },
       { name = "minFoliageRange", ty = "number", rw = "RW" },
       { name = "playerTownLevel", ty = "integer", rw = "RW" },
-      { name = "gates", ty = "ogre_unordered_set<hand>::type", rw = "RW" },
       { name = "playerHasBuildingsInThisTown", ty = "boolean", rw = "RW" },
       { name = "powerInList", ty = "hand", rw = "RW" },
-      { name = "powerOutList", ty = "ogre_unordered_set<hand>::type", rw = "RW" },
-      { name = "batteryList", ty = "ogre_unordered_set<hand>::type", rw = "RW" },
       { name = "batteryMode", ty = "boolean", rw = "RW" },
       { name = "power_Stat", ty = "number", rw = "RW" },
       { name = "maxPower_Stat", ty = "number", rw = "RW" },
@@ -4377,10 +4231,8 @@ return {
       { name = "positionCacher", ty = "TownPositionCacher", rw = "R" },
       { name = "townType", ty = "integer", rw = "RW" },
       { name = "population", ty = "BasePopulationManager*", rw = "R" },
-      { name = "factionsResidentHere", ty = "std::set<Faction*, std::less<Faction*>, Ogre::STLAllocator<Faction*, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "alreadyInitialisedPopulationParams", ty = "boolean", rw = "RW" },
       { name = "isSecret", ty = "boolean", rw = "RW" },
-      { name = "occupiers", ty = "std::set<hand, std::less<hand>, Ogre::STLAllocator<hand, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "timeOfDeath", ty = "TimeOfDay", rw = "R" },
       { name = "p_TIME", ty = "number", rw = "RW" },
       { name = "nestBatcher", ty = "NestBatcher*", rw = "R" },
@@ -4394,21 +4246,13 @@ return {
       { name = "biome", ty = "AreaBiomeGroup*", rw = "R" },
       { name = "alarmState", ty = "TownAlarmState", rw = "R" },
       { name = "isActivated", ty = "boolean", rw = "RW" },
-      { name = "myZoneCoverage", ty = "ogre_unordered_set<ZoneMap*>::type", rw = "R" },
-      { name = "populatedZones", ty = "ogre_unordered_map<ZoneMap*, bool>::type", rw = "R" },
-      { name = "artifacts", ty = "Ogre::FastArray<ArtifactItemData>", rw = "R" },
       { name = "currentFloorVisibility", ty = "integer", rw = "RW" },
       { name = "buildingsManager", ty = "TownBuildingsManager", rw = "R" },
-      { name = "residentsSpawned", ty = "lektor<TownBase::ResidentData>", rw = "RW" },
-      { name = "residentsSpawned_BarsOrSomething", ty = "lektor<TownBase::ResidentData>", rw = "RW" },
       { name = "defaultResident", ty = "GameData", rw = "R" },
     },
   },
   ["TownBuildingsManager"] = {
     fields = {
-      { name = "buildingEntities", ty = "ogre_unordered_map<Building*, TownBuildingsManager::BuildingInfo>::type", rw = "R" },
-      { name = "instancesManagers", ty = "boost::unordered::unordered_map<std::string, Ogre::InstanceManager*, boost::hash<std::string >, std::equal_to<std::string >, Ogre::STLAllocator<std::pair<std::string const, Ogre::InstanceManager*>, Ogre::GeneralAllocPolicy > >", rw = "R" },
-      { name = "signs", ty = "Ogre::FastArray<std::pair<Building*, Ogre::Entity*> >", rw = "R" },
       { name = "signsVisible", ty = "boolean", rw = "RW" },
       { name = "town", ty = "TownBase*", rw = "R" },
     },
@@ -4561,7 +4405,6 @@ return {
       { name = "squadTemplate", ty = "GameData", rw = "RW" },
       { name = "desiredNumberToHave", ty = "integer", rw = "RW" },
       { name = "respawnTimer", ty = "number", rw = "RW" },
-      { name = "existingSquadsList", ty = "lektor<hand>", rw = "RW" },
     },
   },
   ["UseableStuff"] = {
@@ -4609,7 +4452,6 @@ return {
       { name = "currentPower", ty = "number", rw = "RW" },
       { name = "powerTimeStored", ty = "number", rw = "RW" },
       { name = "_powerTimeStoreMax", ty = "number", rw = "RW" },
-      { name = "currentOperators", ty = "std::set<hand, std::less<hand>, Ogre::STLAllocator<hand, Ogre::GeneralAllocPolicy > >", rw = "R" },
       { name = "usesStat", ty = "integer", rw = "RW" },
       { name = "functionalityData", ty = "GameData", rw = "R" },
       { name = "animation", ty = "GameData", rw = "R" },
@@ -4643,7 +4485,6 @@ return {
     fields = {
       { name = "wallSectionLinkType", ty = "WallSectionLinkType", rw = "R" },
       { name = "shareBuildStateOfAnother", ty = "hand", rw = "R" },
-      { name = "othersSharingMyBuildState", ty = "lektor<hand>", rw = "R" },
     },
   },
   ["Weapon"] = {
@@ -4685,20 +4526,12 @@ return {
       { name = "isTrue", ret = "boolean" },
     },
     fields = {
-      { name = "uniqueNPCsAre", ty = "ogre_unordered_map<GameData*, WorldStateEnum>::type", rw = "R" },
-      { name = "uniqueNPCsAreNot", ty = "ogre_unordered_map<GameData*, WorldStateEnum>::type", rw = "R" },
-      { name = "towns", ty = "ogre_unordered_map<GameData*, WorldStateEnum>::type", rw = "R" },
-      { name = "isAllyOf", ty = "ogre_unordered_map<Faction*, bool>::type", rw = "R" },
-      { name = "isEnemyOf", ty = "ogre_unordered_map<Faction*, bool>::type", rw = "R" },
       { name = "playerInvolvement", ty = "boolean", rw = "RW" },
     },
   },
   ["WorldEventStateQueryList"] = {
     methods = {
       { name = "isTrue", ret = "boolean" },
-    },
-    fields = {
-      { name = "statesList", ty = "ogre_unordered_map<WorldEventStateQuery*, bool>::type", rw = "R" },
     },
   },
   ["YesNoMaybe"] = {
