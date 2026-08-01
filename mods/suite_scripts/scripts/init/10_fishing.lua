@@ -41,6 +41,10 @@ local CFG = {
     -- leave free. Change here if it collides; the keycode logger finds codes.
     fishKey     = 34,    -- G
     castSeconds = 3.0,
+    -- Standstill radius (squared, world units). Kenshi world units are large;
+    -- ~2.5 units of drift is generous enough to survive idle sway but cancels
+    -- on a real walk. Tune from the "cast broken -- you moved" logs.
+    moveToleranceSq = 6.0,
     baseChance  = 0.25,
     garbageOdds = 0.40,
     logKeycodes = false,
@@ -76,10 +80,31 @@ Fishing.state = Fishing.state or {}      -- [charName] = { casting, elapsed, cau
 local function stateFor(name)
     local s = Fishing.state[name]
     if not s then
-        s = { casting = false, elapsed = 0, caught = 0, garbage = 0 }
+        s = { casting = false, elapsed = 0, caught = 0, garbage = 0, anchor = nil }
         Fishing.state[name] = s
     end
     return s
+end
+
+-- ---------------------------------------------------------------------------
+-- Position helpers. Character:getPosition() is VERIFIED and returns a Vector3
+-- as a Lua table; handle both {x=,y=,z=} and {1,2,3} shapes since we have not
+-- confirmed which.
+-- ---------------------------------------------------------------------------
+local function readPos(character)
+    local ok, p = pcall(function() return character:getPosition() end)
+    if not ok or type(p) ~= "table" then return nil end
+    local x = p.x or p[1]
+    local y = p.y or p[2]
+    local z = p.z or p[3]
+    if type(x) ~= "number" or type(z) ~= "number" then return nil end
+    return { x = x, y = y or 0, z = z }
+end
+
+local function distSq(a, b)
+    if not a or not b then return 0 end
+    local dx, dy, dz = a.x - b.x, (a.y or 0) - (b.y or 0), a.z - b.z
+    return dx * dx + dy * dy + dz * dz
 end
 
 -- ---------------------------------------------------------------------------
@@ -188,7 +213,10 @@ local function beginCast(character, name)
         return
     end
     s.casting, s.elapsed = true, 0
-    log(name .. ": cast! (" .. why .. ") ... " .. CFG.castSeconds .. "s")
+    -- Anchor the cast to a spot. Moving away cancels it (see the tick handler):
+    -- fishing is a deliberate act you stand still for, not something done at a jog.
+    s.anchor = readPos(character)
+    log(name .. ": cast! (" .. why .. ") ... hold still " .. CFG.castSeconds .. "s")
 end
 
 local function finishCast(character, name)
@@ -262,12 +290,28 @@ if type(registerHandler) == "function" then
         for name, s in pairs(Fishing.state) do
             if s.casting then
                 s.elapsed = s.elapsed + 1
-                if s.elapsed >= target then
-                    local ok, character = pcall(function() return getSelectedCharacter() end)
-                    if ok and character then
-                        finishCast(character, name)
-                    else
-                        s.casting = false
+
+                local ok, character = pcall(function() return getSelectedCharacter() end)
+                if not ok or not character then
+                    s.casting, s.anchor = false, nil
+                else
+                    -- STANDSTILL: drifting off the anchor cancels the cast.
+                    if s.anchor then
+                        local now = readPos(character)
+                        if now and distSq(now, s.anchor) > CFG.moveToleranceSq then
+                            s.casting, s.elapsed, s.anchor = false, 0, nil
+                            log(name .. ": cast broken -- you moved. hold still to fish.")
+                        end
+                    end
+                    -- Water can also change underfoot mid-cast (waded out too deep).
+                    if s.casting then
+                        local can, why = Fishing.canFish(character)
+                        if not can then
+                            s.casting, s.elapsed, s.anchor = false, 0, nil
+                            log(name .. ": cast broken -- " .. why)
+                        elseif s.elapsed >= target then
+                            finishCast(character, name)
+                        end
                     end
                 end
             end
