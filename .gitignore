@@ -1,0 +1,25 @@
+# Build
+**/x64/
+**/Release/
+**/Debug/
+**/*.user
+**/*.suo
+**/.vs/
+**/bin/
+**/obj/
+
+# Kenshi local
+**/mods/**/*.dll
+!src/**/*.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Secrets
+.env
+*.pem
