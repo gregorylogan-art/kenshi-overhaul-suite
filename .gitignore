@@ -27,3 +27,7 @@ Thumbs.db
 # Upstream clones (use scripts/clone-toolchain.sh)
 third_party/
 kenshi-toolchain/
+
+# Prebuilt toolchain downloads (fetch via scripts/clone-toolchain.sh + GitHub Releases)
+downloads/
+third_party/
