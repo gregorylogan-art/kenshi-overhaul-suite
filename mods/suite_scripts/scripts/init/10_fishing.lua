@@ -48,14 +48,22 @@ local CFG = {
     -- DESIGN (Greg, 2026-08-01): fish while WADING, not while SWIMMING.
     -- Swimming locks the character's animation state, so no fishing animation
     -- can ever play there -- and the suite design always said "free-form cast at
-    -- the walk<->swim boundary". Wading = in water, still standing, animation
-    -- free. So the rule is: in water AND NOT swimming.
-    requireNotSwimming = true,
+    -- the walk<->swim boundary". Wading = in water, still standing, animation free.
+    --
+    -- MEASURED depth gradient (live survey, deep shelf -> shore -> land -> hill):
+    --     waterLevel 3  swimming 1.05 .. 8.77   deep / swimming
+    --     waterLevel 2  swimming 1              shallow / wading
+    --     waterLevel 0  swimming 12.91          ON LAND
+    --
+    -- CRITICAL: `swimming` is NOT a boolean and NOT depth -- it is an accumulator
+    -- that LAGS. It read 12.91 while standing on dry land. Gating on it would
+    -- block fishing everywhere. `waterLevel` is the trustworthy depth signal, so
+    -- the rule is a waterLevel BAND.
+    minWaterLevel = 1,   -- below this = dry land, nothing to fish
+    maxWaterLevel = 2,   -- above this = too deep, swim animation locks the body
 
-    -- We have no measurements of the wading state yet (the probe only sampled
-    -- mid-swim: swimming=1, waterLevel=0). Until we do, the key press dumps the
-    -- full water state every time so the real thresholds can be read off the
-    -- log rather than guessed.
+    -- Keep dumping the full state on every press until the band is confirmed
+    -- across more shorelines. Cheap, and it is how both prior rules got fixed.
     surveyMode  = true,
 }
 
@@ -117,20 +125,18 @@ function Fishing.canFish(character)
     local st = Fishing.readWaterState(character)
     local desc = describe(st)
 
-    local swimming = st.swimming
-    local isSwimming = (type(swimming) == "number" and swimming > 0) or swimming == true
-
+    -- Gate on waterLevel ONLY. `swimming` is deliberately ignored for the
+    -- decision (it lagged at 12.91 on dry land); it is still logged because it
+    -- may become useful once we understand what it accumulates.
     local water = (type(st.waterLevel) == "number") and st.waterLevel or 0
-    local inWater = water > 0 or isSwimming
 
-    if not inWater then
-        return false, "not in water | " .. desc
+    if water < CFG.minWaterLevel then
+        return false, "on land -- wade into the shallows | " .. desc
     end
-    -- Wading only: swimming locks animation, so the boundary is the fishing spot.
-    if CFG.requireNotSwimming and isSwimming then
-        return false, "swimming (animation locked) -- wade to the edge | " .. desc
+    if water > CFG.maxWaterLevel then
+        return false, "too deep (body locked in swim) -- move to the shallows | " .. desc
     end
-    return true, "wading | " .. desc
+    return true, ("wading (waterLevel=%d) | %s"):format(water, desc)
 end
 
 -- ---------------------------------------------------------------------------
