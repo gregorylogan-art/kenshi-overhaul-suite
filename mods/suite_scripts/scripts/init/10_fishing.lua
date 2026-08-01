@@ -36,12 +36,27 @@ local function log(m) print(TAG .. tostring(m)) end
 -- Config
 -- ---------------------------------------------------------------------------
 local CFG = {
-    fishKey     = 33,    -- OIS/DirectInput scancode. 33 = F. Confirmed by the
-                         -- keycode logger below -- press keys and read the log.
-    castSeconds = 3.0,   -- how long a cast takes
-    baseChance  = 0.25,  -- v0: flat 25% (v1 will fold in skill)
-    garbageOdds = 0.40,  -- of successful catches, share that are junk
-    logKeycodes = true,  -- discovery aid: log every keycode pressed
+    -- 33 = F was CONFIRMED working, but F is bound to centre-on-character in
+    -- vanilla Kenshi, so it double-fires. 34 = G, which vanilla appears to
+    -- leave free. Change here if it collides; the keycode logger finds codes.
+    fishKey     = 34,    -- G
+    castSeconds = 3.0,
+    baseChance  = 0.25,
+    garbageOdds = 0.40,
+    logKeycodes = false,
+
+    -- DESIGN (Greg, 2026-08-01): fish while WADING, not while SWIMMING.
+    -- Swimming locks the character's animation state, so no fishing animation
+    -- can ever play there -- and the suite design always said "free-form cast at
+    -- the walk<->swim boundary". Wading = in water, still standing, animation
+    -- free. So the rule is: in water AND NOT swimming.
+    requireNotSwimming = true,
+
+    -- We have no measurements of the wading state yet (the probe only sampled
+    -- mid-swim: swimming=1, waterLevel=0). Until we do, the key press dumps the
+    -- full water state every time so the real thresholds can be read off the
+    -- log rather than guessed.
+    surveyMode  = true,
 }
 
 -- ---------------------------------------------------------------------------
@@ -71,26 +86,51 @@ local function roll() return math.random() end
 -- disagreeing (swimming=1 while getWaterLevel=0), so `swimming` is the
 -- trustworthy signal.
 -- ---------------------------------------------------------------------------
+-- Read every water-ish signal we have verified, so thresholds come from
+-- measurement instead of guesswork.
+function Fishing.readWaterState(character)
+    local st = {}
+    local function grab(key, fn)
+        local ok, v = pcall(fn)
+        st[key] = ok and v or nil
+        return st[key]
+    end
+    local ok, stats = pcall(function() return character:getStats() end)
+    if ok and stats then
+        grab("swimming", function() return stats.swimming end)
+        grab("swimSpeed", function() return stats:calculateSwimSpeed() end)
+    end
+    grab("waterLevel",    function() return character:getWaterLevel() end)
+    grab("terrainHeight", function() return character:getTerrainHeightPosition() end)
+    grab("isOnARoof",     function() return character:isOnARoof() end)
+    return st
+end
+
+local function describe(st)
+    return ("swimming=%s waterLevel=%s swimSpeed=%s terrainH=%s")
+        :format(tostring(st.swimming), tostring(st.waterLevel),
+                tostring(st.swimSpeed), tostring(st.terrainHeight))
+end
+
 function Fishing.canFish(character)
     if not character then return false, "no character" end
+    local st = Fishing.readWaterState(character)
+    local desc = describe(st)
 
-    local ok, stats = pcall(function() return character:getStats() end)
-    if not ok or not stats then return false, "no stats" end
+    local swimming = st.swimming
+    local isSwimming = (type(swimming) == "number" and swimming > 0) or swimming == true
 
-    local okSwim, swimming = pcall(function() return stats.swimming end)
-    if not okSwim then return false, "swimming unreadable" end
+    local water = (type(st.waterLevel) == "number") and st.waterLevel or 0
+    local inWater = water > 0 or isSwimming
 
-    local water = 0
-    local okW, w = pcall(function() return character:getWaterLevel() end)
-    if okW and type(w) == "number" then water = w end
-
-    local inWater = (type(swimming) == "number" and swimming > 0)
-                 or (swimming == true)
-                 or (water > 0)
     if not inWater then
-        return false, ("not in water (swimming=%s waterLevel=%s)"):format(tostring(swimming), tostring(water))
+        return false, "not in water | " .. desc
     end
-    return true, ("in water (swimming=%s waterLevel=%s)"):format(tostring(swimming), tostring(water))
+    -- Wading only: swimming locks animation, so the boundary is the fishing spot.
+    if CFG.requireNotSwimming and isSwimming then
+        return false, "swimming (animation locked) -- wade to the edge | " .. desc
+    end
+    return true, "wading | " .. desc
 end
 
 -- ---------------------------------------------------------------------------
@@ -167,11 +207,23 @@ end
 -- discovers real keycodes and proves the hook fires.
 -- ---------------------------------------------------------------------------
 if type(registerHandler) == "function" then
+    local typeLogged = false
     registerHandler("onKeyDown", function(keyCode)
+        -- Diagnose the argument's real type ONCE. v0.1 lost a run because the
+        -- handler fired on F (scancode 33, confirmed in the log) but the equality
+        -- test never matched -- a strong sign keyCode is not a plain number.
+        if not typeLogged then
+            typeLogged = true
+            log(("keyCode type=%s value=%s"):format(type(keyCode), tostring(keyCode)))
+        end
         if CFG.logKeycodes then
             log("keycode " .. tostring(keyCode))
         end
-        if keyCode ~= CFG.fishKey then return end
+        -- Type-tolerant compare: accept number, numeric string, or anything
+        -- whose tostring() is the scancode.
+        local kc = tonumber(keyCode) or tonumber(tostring(keyCode))
+        if kc ~= CFG.fishKey then return end
+        log("FISH KEY MATCHED (" .. tostring(kc) .. ")")
 
         local ok, character = pcall(function() return getSelectedCharacter() end)
         if not ok or not character then
@@ -179,7 +231,17 @@ if type(registerHandler) == "function" then
             return
         end
         local okN, name = pcall(function() return character:getName() end)
-        beginCast(character, (okN and name) or "?")
+        name = (okN and name) or "?"
+
+        -- SURVEY: dump the water state on every press, wherever you stand.
+        -- Press on dry land, at the shoreline, ankle-deep, and while swimming --
+        -- the log then shows exactly which signal separates wading from
+        -- swimming, and the threshold stops being a guess.
+        if CFG.surveyMode then
+            log(("SURVEY %s | %s"):format(name, describe(Fishing.readWaterState(character))))
+        end
+
+        beginCast(character, name)
     end)
     log("input hook armed -- press F while a swimming character is selected")
 
