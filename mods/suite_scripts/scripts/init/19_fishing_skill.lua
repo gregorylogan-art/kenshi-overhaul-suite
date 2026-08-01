@@ -60,8 +60,11 @@ Fishing.SKILL_CFG = {
     castSecPerLabour  = 0.01,
     minCastSeconds    = 2.0,
 
-    -- XP granted per completed cast (small; fishing is not a power-level route)
-    xpPerCast = { swimming = 0.5, labouring = 1.0, precisionShooting = 0.5, perception = 0.25 },
+    -- XP granted per completed cast (small; fishing is not a power-level route).
+    -- Tuned live by Greg after watching the skill tab move: Labouring leads
+    -- because fishing is graft, Precision Shooting and Swimming are secondary
+    -- side-effects, Perception is a trickle.
+    xpPerCast = { labouring = 1.0, precisionShooting = 0.4, swimming = 0.3, perception = 0.25 },
 }
 
 -- ---------------------------------------------------------------------------
