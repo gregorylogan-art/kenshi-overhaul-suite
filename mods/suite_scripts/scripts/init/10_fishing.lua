@@ -185,12 +185,14 @@ end
 -- name differs -- alternates are tried below and the pool self-prunes to
 -- whatever actually exists.
 local JUNK_CANDIDATES = {
-    "Iron Club",        -- category 2, confirmed
-    "Straw Hat",        -- category 3, confirmed
-    "Rag Loincloth",    -- category 3, confirmed
-    -- footwear name unknown; first one that resolves wins
-    "Sandles", "Leather Sandals", "Cloth Sandals", "Shoddy Sandals",
-    "Rag Shirt", "Dustcoat", "Shirt",
+    -- confirmed resolving
+    "Iron Club",            -- category 2
+    "Straw Hat",            -- category 3
+    "Rag Loincloth",        -- category 3
+    -- Greg's riverbed-trash picks: all equally worthless, which is the point
+    "Empty Rum Bottle", "Cup", "Wooden Bowl", "Damaged Book",
+    -- spelling alternates; the pool self-prunes to whatever exists
+    "Rum Bottle", "Bottle", "Bowl", "Book", "Damaged book",
 }
 local JUNK_POOL = nil   -- built on first use from what actually resolves
 
