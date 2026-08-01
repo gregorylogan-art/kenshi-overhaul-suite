@@ -216,7 +216,18 @@ function Fishing.tryCatch(character)
             return true, JUNK_POOL[math.random(#JUNK_POOL)], true
         end
     end
-    return true, "raw_fish", false
+    -- Resolve the best available fish once; falls back down the preference list.
+    if not Fishing._fishName then
+        for _, n in ipairs(FISH_PREFERENCE) do
+            if lookupItemData(character, n) then
+                Fishing._fishName = n
+                log("fish item in use: " .. n)
+                break
+            end
+        end
+        Fishing._fishName = Fishing._fishName or "Dried Fish"
+    end
+    return true, Fishing._fishName, false
 end
 
 -- ---------------------------------------------------------------------------
@@ -240,9 +251,18 @@ end
 
 -- Real vanilla item names. "Dried Fish" ships with Kenshi (Newwworld.mod), so
 -- Phase 1 needs no FCS item authoring at all.
+-- Preferred fish, best first. Each name is tried in order and the first that
+-- RESOLVES wins, so the moment the FCS items are authored fishing switches to
+-- them automatically -- and until then it keeps working on vanilla Dried Fish.
+-- No code change needed on either side of the FCS session.
+local FISH_PREFERENCE = {
+    "Small Fish",   -- FCS (pending) -- the honest common catch
+    "Raw Fish",     -- FCS (pending) -- Raw Meat equivalent
+    "Dried Fish",   -- vanilla fallback, confirmed working
+}
+
 local ITEM_NAMES = {
-    raw_fish     = "Dried Fish",
-    junk_sandal  = "Iron Plates",   -- placeholder "rusted scrap" until FCS junk exists
+    junk_sandal = "Iron Plates",   -- legacy alias, unused now
 }
 
 local ITEM_CATEGORY = 4
