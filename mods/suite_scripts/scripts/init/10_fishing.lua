@@ -41,6 +41,10 @@ local CFG = {
     -- leave free. Change here if it collides; the keycode logger finds codes.
     fishKey     = 34,    -- G
     castSeconds = 3.0,
+    -- A cast should nearly always produce SOMETHING (Greg, v1). Empty pulls are
+    -- a rare anomaly, not the common case -- junk is the low-skill outcome, not
+    -- nothing. 1% keeps the occasional "line came back empty" moment alive.
+    nothingChance = 0.01,
     -- Standstill radius (squared, world units). Kenshi world units are large;
     -- ~2.5 units of drift is generous enough to survive idle sway but cancels
     -- on a real walk. Tune from the "cast broken -- you moved" logs.
@@ -168,12 +172,41 @@ end
 -- CONTRACT: tryCatch  -> caught, itemId, isGarbage
 -- v0 is a coin flip on purpose.
 -- ---------------------------------------------------------------------------
+-- Junk pool: real, cheap vanilla Kenshi items (Greg's picks -- these read as
+-- authentic riverbed trash). One is chosen at random per junk pull.
+--
+-- RESOLVED CATEGORIES (measured live): 2 = weapons, 3 = clothing/armour,
+-- 4 = food/materials. "Sandals" was NOT FOUND in any category, so the vanilla
+-- name differs -- alternates are tried below and the pool self-prunes to
+-- whatever actually exists.
+local JUNK_CANDIDATES = {
+    "Iron Club",        -- category 2, confirmed
+    "Straw Hat",        -- category 3, confirmed
+    "Rag Loincloth",    -- category 3, confirmed
+    -- footwear name unknown; first one that resolves wins
+    "Sandles", "Leather Sandals", "Cloth Sandals", "Shoddy Sandals",
+    "Rag Shirt", "Dustcoat", "Shirt",
+}
+local JUNK_POOL = nil   -- built on first use from what actually resolves
+
 function Fishing.tryCatch(character)
-    if roll() > CFG.baseChance then
+    -- Rare empty pull first, then the real split: fish vs junk.
+    if roll() < CFG.nothingChance then
         return false, nil, false
     end
     if roll() < CFG.garbageOdds then
-        return true, "junk_sandal", true
+        -- Build the pool once, keeping only names that genuinely resolve, so a
+        -- bad guess degrades to "fewer junk types" instead of a failed grant.
+        if not JUNK_POOL then
+            JUNK_POOL = {}
+            for _, n in ipairs(JUNK_CANDIDATES) do
+                if lookupItemData(character, n) then JUNK_POOL[#JUNK_POOL + 1] = n end
+            end
+            log("junk pool resolved: " .. (#JUNK_POOL > 0 and table.concat(JUNK_POOL, ", ") or "NONE"))
+        end
+        if #JUNK_POOL > 0 then
+            return true, JUNK_POOL[math.random(#JUNK_POOL)], true
+        end
     end
     return true, "raw_fish", false
 end
@@ -218,14 +251,38 @@ local gameDataCache = {}
 
 local function lookupItemData(character, itemId)
     local name = ITEM_NAMES[itemId] or itemId
-    if gameDataCache[name] ~= nil then return gameDataCache[name] end
+    if gameDataCache[name] ~= nil then return gameDataCache[name] or nil end
+
     local container = getContainer(character)
     if not container then return nil end
-    local ok, gd = pcall(function()
-        return container:getDataByName(name, ITEM_CATEGORY)
-    end)
-    gameDataCache[name] = (ok and gd) or false
-    return gameDataCache[name] or nil
+
+    -- Category 4 holds food/materials ("Dried Fish" lives there), but clothing
+    -- and weapons are almost certainly elsewhere. Try 4 first, then sweep --
+    -- cached, so the sweep happens at most once per item name.
+    local function tryCat(cat)
+        local ok, gd = pcall(function() return container:getDataByName(name, cat) end)
+        if ok and gd then return gd end
+        return nil
+    end
+
+    local gd = tryCat(ITEM_CATEGORY)
+    local foundCat = ITEM_CATEGORY
+    if not gd then
+        for cat = 0, 40 do
+            if cat ~= ITEM_CATEGORY then
+                gd = tryCat(cat)
+                if gd then foundCat = cat break end
+            end
+        end
+    end
+
+    if gd then
+        log(("item resolved: %-16s category=%d"):format(name, foundCat))
+    else
+        log("item NOT FOUND in any category: " .. name)
+    end
+    gameDataCache[name] = gd or false
+    return gd
 end
 
 local function tryGrantItem(character, itemId)
@@ -238,18 +295,31 @@ local function tryGrantItem(character, itemId)
     local okH, hand = pcall(function() return inv:getHandle() end)
     if not okH or not hand then return false, "no inventory handle" end
 
-    local okMake, item = pcall(function()
-        return getRootObjectFactory():createItem(gd, hand, nil, nil, 0, nil)
-    end)
-    if not okMake or not item then
-        return false, "createItem failed: " .. tostring(item)
+    -- The number slot is a LEVEL. 0 works for food/materials but returns nil for
+    -- weapons (Iron Club, category 2) -- gear presumably needs a real quality
+    -- level. Try a few until one yields an Item.
+    local factory = getRootObjectFactory()
+    local item
+    for _, lvl in ipairs({ 0, 1, -1, 2 }) do
+        local ok, made = pcall(function()
+            return factory:createItem(gd, hand, nil, nil, lvl, nil)
+        end)
+        if ok and made then item = made break end
+    end
+    if not item then
+        return false, "createItem returned nil at every level"
     end
 
     local okAdd, res = pcall(function() return inv:addItem(item, 1, true, false) end)
     if okAdd and res then
         return true, ITEM_NAMES[itemId] or itemId
     end
-    return false, "addItem failed: " .. tostring(res)
+    -- addItem returning false is usually NO ROOM -- normal game behaviour once a
+    -- pack fills with junk, not a code fault. Say so rather than crying bug.
+    if okAdd then
+        return false, "no room in inventory (drop some junk)"
+    end
+    return false, "addItem error: " .. tostring(res)
 end
 
 -- ---------------------------------------------------------------------------
@@ -294,9 +364,20 @@ end
 -- Input. onKeyDown is documented but unverified -- the logger below both
 -- discovers real keycodes and proves the hook fires.
 -- ---------------------------------------------------------------------------
+-- RELOAD SAFETY. `dofile` re-runs this file, and each run used to register
+-- ANOTHER pair of handlers -- so old copies of the script kept running beside
+-- the new one. Observed live: two different tallies (fish=17 and fish=6) and a
+-- pre-fix grant error resurfacing from a stale closure. Unregister anything a
+-- previous load left behind before wiring new handlers.
+if Fishing._handlers and type(unregisterHandler) == "function" then
+    for _, hid in ipairs(Fishing._handlers) do pcall(unregisterHandler, hid) end
+    log("unregistered " .. #Fishing._handlers .. " handler(s) from a previous load")
+end
+Fishing._handlers = {}
+
 if type(registerHandler) == "function" then
     local typeLogged = false
-    registerHandler("onKeyDown", function(keyCode)
+    Fishing._handlers[#Fishing._handlers + 1] = registerHandler("onKeyDown", function(keyCode)
         -- Diagnose the argument's real type ONCE. v0.1 lost a run because the
         -- handler fired on F (scancode 33, confirmed in the log) but the equality
         -- test never matched -- a strong sign keyCode is not a plain number.
@@ -331,7 +412,7 @@ if type(registerHandler) == "function" then
 
         beginCast(character, name)
     end)
-    log("input hook armed -- press F while a swimming character is selected")
+    log("input hook armed -- press G while WADING (shallow water) with a character selected")
 
     -- Timer: onCharsUpdate is the sim tick. Frame delta is not exposed, so v0
     -- counts ticks. MEASURED from the live log: a "3s" cast completed in ~0.9s
@@ -340,7 +421,7 @@ if type(registerHandler) == "function" then
     -- real time properly rather than counting ticks.)
     local TICKS_PER_SEC = 100
     local target = CFG.castSeconds * TICKS_PER_SEC
-    registerHandler("onCharsUpdate", function()
+    Fishing._handlers[#Fishing._handlers + 1] = registerHandler("onCharsUpdate", function()
         for name, s in pairs(Fishing.state) do
             if s.casting then
                 s.elapsed = s.elapsed + 1
@@ -375,4 +456,4 @@ else
     log("registerHandler unavailable -- fishing inert")
 end
 
-log("Fishing v0 loaded. Select a character, get in water, press F.")
+log("Fishing v1 loaded. Select a character, WADE into shallow water, hold still, press G.")
