@@ -183,19 +183,73 @@ end
 -- Never invents success: if no route works the catch still counts in suite
 -- state, and we learn which API to use for v0.1.
 -- ---------------------------------------------------------------------------
+-- ---------------------------------------------------------------------------
+-- ITEM MINT + GRANT -- SOLVED 2026-08-01, entirely by reading argument errors.
+-- The documented signature was wrong; this is the real one:
+--
+--   factory:createItem(gameData, hand, gameData?, gameData?, number, Faction?)
+--                      ^itemType ^owner  nil ok     nil ok     0      nil ok
+--   inv:addItem(item, 1, true, false) -> true
+--
+-- Reaching the item database (validated -- GameWorld.gamedata RESOLVES but
+-- cannot answer queries, so it must be tested, not assumed):
+--   character:getFaction():getData().sourceContainer -> GameDataContainer
+--   container:getDataByName(<name>, 4)               -> GameData   (4 = items)
+-- ---------------------------------------------------------------------------
+
+-- Real vanilla item names. "Dried Fish" ships with Kenshi (Newwworld.mod), so
+-- Phase 1 needs no FCS item authoring at all.
+local ITEM_NAMES = {
+    raw_fish     = "Dried Fish",
+    junk_sandal  = "Iron Plates",   -- placeholder "rusted scrap" until FCS junk exists
+}
+
+local ITEM_CATEGORY = 4
+
+local function getContainer(character)
+    local ok, c = pcall(function()
+        return character:getFaction():getData().sourceContainer
+    end)
+    if ok and c then return c end
+    return nil
+end
+
+local gameDataCache = {}
+
+local function lookupItemData(character, itemId)
+    local name = ITEM_NAMES[itemId] or itemId
+    if gameDataCache[name] ~= nil then return gameDataCache[name] end
+    local container = getContainer(character)
+    if not container then return nil end
+    local ok, gd = pcall(function()
+        return container:getDataByName(name, ITEM_CATEGORY)
+    end)
+    gameDataCache[name] = (ok and gd) or false
+    return gameDataCache[name] or nil
+end
+
 local function tryGrantItem(character, itemId)
     local okInv, inv = pcall(function() return character:getInventory() end)
-    if not okInv or not inv then
-        return false, "no inventory"
+    if not okInv or not inv then return false, "no inventory" end
+
+    local gd = lookupItemData(character, itemId)
+    if not gd then return false, "no GameData for " .. tostring(ITEM_NAMES[itemId] or itemId) end
+
+    local okH, hand = pcall(function() return inv:getHandle() end)
+    if not okH or not hand then return false, "no inventory handle" end
+
+    local okMake, item = pcall(function()
+        return getRootObjectFactory():createItem(gd, hand, nil, nil, 0, nil)
+    end)
+    if not okMake or not item then
+        return false, "createItem failed: " .. tostring(item)
     end
-    -- documented as Inventory:addItem(quantity, dropOnFail, destroyOnFail) --
-    -- note it takes no item id, so this likely is NOT the mint route.
-    if inv.addItem then
-        local ok, res = pcall(function() return inv:addItem(1, true, false) end)
-        if ok then return true, "inv:addItem -> " .. tostring(res) end
-        return false, "inv:addItem err " .. tostring(res)
+
+    local okAdd, res = pcall(function() return inv:addItem(item, 1, true, false) end)
+    if okAdd and res then
+        return true, ITEM_NAMES[itemId] or itemId
     end
-    return false, "no addItem on Inventory"
+    return false, "addItem failed: " .. tostring(res)
 end
 
 -- ---------------------------------------------------------------------------
