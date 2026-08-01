@@ -106,9 +106,15 @@ def parse(md: str):
     return classes
 
 
-def classify(name: str, args: str) -> str:
+def classify(name: str, args: str, ret: str = "") -> str:
     """SAFE_CALL | NEEDS_ARGS | UNSAFE -- guilty until proven innocent."""
     low = name.lower().lstrip("_")
+    # Rule 5 applies to RETURN types too: Faction:getActivePlatoons returns a
+    # container of pointers and hard-crashed the game exactly like the field
+    # form did. Constructing the container is what kills it, not how it is
+    # reached.
+    if unsafe_field_type(ret):
+        return "UNSAFE"
     # Rule 3 first: blocklist beats everything.
     for bad in BLOCK:
         if bad in low:
@@ -142,9 +148,9 @@ def main() -> int:
     ]
     for cls in sorted(classes):
         d = classes[cls]
-        safe = [m for m in d["methods"] if classify(m[0], m[1]) == "SAFE_CALL"]
-        n_args += sum(1 for m in d["methods"] if classify(m[0], m[1]) == "NEEDS_ARGS")
-        n_unsafe += sum(1 for m in d["methods"] if classify(m[0], m[1]) == "UNSAFE")
+        safe = [m for m in d["methods"] if classify(m[0], m[1], m[2]) == "SAFE_CALL"]
+        n_args += sum(1 for m in d["methods"] if classify(m[0], m[1], m[2]) == "NEEDS_ARGS")
+        n_unsafe += sum(1 for m in d["methods"] if classify(m[0], m[1], m[2]) == "UNSAFE")
         n_safe += len(safe)
         fields = [f for f in d["fields"] if not unsafe_field_type(f[1])]
         n_field_blocked += len(d["fields"]) - len(fields)

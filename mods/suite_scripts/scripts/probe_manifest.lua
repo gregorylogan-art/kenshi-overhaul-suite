@@ -1666,14 +1666,12 @@ return {
       { name = "getData", ret = "GameData" },
       { name = "getDefaultDivision", ret = "GameData" },
       { name = "getFactionColorScheme", ret = "GameData" },
-      { name = "getActivePlatoons", ret = "lektor<Platoon*>" },
       { name = "getFactionSize", ret = "integer" },
       { name = "isThePlayer", ret = "boolean" },
       { name = "isNotARealFaction", ret = "boolean" },
       { name = "getName", ret = "void" },
       { name = "getSquadThatOwns", ret = "Platoon" },
       { name = "getAllSquadsThatOwn", ret = "void" },
-      { name = "getAllActiveSquads", ret = "lektor<Platoon*>" },
       { name = "getRoadPreference", ret = "number" },
       { name = "isAntiSlavery", ret = "boolean" },
       { name = "getFundamentalNPCType", ret = "integer" },
@@ -1721,7 +1719,6 @@ return {
       { name = "getEmptyFaction", ret = "Faction" },
       { name = "getFactionBySquad", ret = "Faction" },
       { name = "getNumTempPlatoons", ret = "integer" },
-      { name = "getAllFactions", ret = "lektor<Faction*>" },
     },
     fields = {
       { name = "addListMuto", ty = "lightuserdata", rw = "R" },
@@ -2424,14 +2421,12 @@ return {
       { name = "isVisible", ret = "boolean" },
       { name = "getHandle", ret = "hand" },
       { name = "getItem", ret = "Item" },
-      { name = "getAllSections", ret = "lektor<InventorySection*>" },
       { name = "getNumItems", ret = "integer" },
       { name = "hasRoomForItem", ret = "boolean" },
       { name = "countItems", ret = "integer" },
       { name = "getBestFoodItem", ret = "Item" },
       { name = "getNumFoodItems", ret = "integer" },
       { name = "getInventoryGUI", ret = "lightuserdata" },
-      { name = "getAllItems", ret = "lektor<Item*>" },
     },
     fields = {
       { name = "hasRoomCache", ty = "Inventory::HasRoomCache", rw = "RW" },
@@ -3272,7 +3267,6 @@ return {
       { name = "getLevelEditor", ret = "lightuserdata" },
       { name = "isEnemy", ret = "boolean" },
       { name = "isFactionKnown", ret = "boolean" },
-      { name = "getAllPlayerCharacters", ret = "lektor<Character*>" },
       { name = "getInteriorsVisible", ret = "boolean" },
       { name = "_isPlayerCharacter", ret = "boolean" },
     },
@@ -3657,7 +3651,6 @@ return {
   ["RootObjectContainer"] = {
     methods = {
       { name = "getNumThings", ret = "integer" },
-      { name = "getThings", ret = "lektor<RootObject*>" },
     },
   },
   ["RootObjectFactory"] = {
