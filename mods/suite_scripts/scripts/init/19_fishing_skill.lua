@@ -29,13 +29,13 @@ local function log(m) print(TAG .. tostring(m)) end
 
 Fishing = Fishing or {}
 
--- Stat IDs are filled in from 18_stat_probe.lua output. Left as nil until then
--- so nothing silently reads the wrong stat.
-Fishing.STAT = Fishing.STAT or {
-    swimming          = nil,
-    labouring         = nil,
-    precisionShooting = nil,
-    perception        = nil,
+-- Stat IDs MEASURED live via 18_stat_probe.lua (38 named stats enumerated).
+-- These are read from the running game, not guessed.
+Fishing.STAT = {
+    labouring         = 3,
+    swimming          = 23,
+    perception        = 24,
+    precisionShooting = 36,
 }
 
 Fishing.SKILL_CFG = {
@@ -127,15 +127,42 @@ function Fishing.readSkill(character, key)
     return 0
 end
 
+-- Grant XP for a completed cast and REPORT it, so we can see the skill tab
+-- actually move rather than trusting that it did.
 function Fishing.grantXp(character)
-    local stats = select(2, pcall(function() return character:getStats() end))
-    if not stats then return end
-    for key, amount in pairs(Fishing.SKILL_CFG.xpPerCast) do
+    local okS, stats = pcall(function() return character:getStats() end)
+    if not okS or not stats then return "no stats" end
+
+    local parts = {}
+    for _, key in ipairs({ "labouring", "swimming", "precisionShooting", "perception" }) do
         local id = Fishing.STAT[key]
-        if id then
-            pcall(function() stats:xpStat_eventBased(id, amount) end)
+        local amount = Fishing.SKILL_CFG.xpPerCast[key]
+        if id and amount then
+            local before = select(2, pcall(function() return stats:getStat(id, false) end))
+            local ok, err = pcall(function() stats:xpStat_eventBased(id, amount) end)
+            local after = select(2, pcall(function() return stats:getStat(id, false) end))
+            if ok then
+                parts[#parts + 1] = ("%s %.3f->%.3f"):format(key, before or -1, after or -1)
+            else
+                parts[#parts + 1] = ("%s ERR(%s)"):format(key, tostring(err))
+            end
         end
     end
+    return table.concat(parts, "  ")
+end
+
+-- Console helper: prove XP lands without waiting on catches.
+--   Fishing.testXp()      one grant
+--   Fishing.testXp(200)   200 grants, to make the skill tab visibly move
+function Fishing.testXp(times)
+    local ok, char = pcall(function() return getSelectedCharacter() end)
+    if not ok or not char then log("select a character first") return end
+    times = times or 1
+    local last
+    for _ = 1, times do last = Fishing.grantXp(char) end
+    log(("granted x%d -> %s"):format(times, tostring(last)))
+    log("now open the character's SKILLS tab and look at Labouring / Swimming /")
+    log("Precision Shooting / Perception")
 end
 
 log("skill model loaded. Try:  Fishing.simulate()")

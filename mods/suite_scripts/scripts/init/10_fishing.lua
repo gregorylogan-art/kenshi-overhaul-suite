@@ -360,6 +360,15 @@ local function finishCast(character, name)
     end
 
     if isGarbage then s.garbage = s.garbage + 1 else s.caught = s.caught + 1 end
+
+    -- Train what the activity uses: Labouring, Swimming, Precision Shooting and
+    -- Perception (stat ids measured live). Precision Shooting is a deliberate
+    -- back door -- same spirit as hauling heavy junk building Strength.
+    if Fishing.grantXp then
+        local xp = Fishing.grantXp(character)
+        if xp then log(name .. ": xp " .. tostring(xp)) end
+    end
+
     local granted, how = tryGrantItem(character, itemId)
     log(("%s: CAUGHT %s%s | grant: %s (%s) | totals fish=%d junk=%d")
         :format(name, itemId, isGarbage and " (junk)" or "",
