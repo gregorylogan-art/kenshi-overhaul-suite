@@ -54,6 +54,7 @@ BLOCK = (
     "enable", "disable", "toggle", "activate", "deactivate", "select",
     "notify", "send", "call", "execute", "run", "do", "force", "trigger",
     "recruit", "enslave", "capture", "teleport", "move", "walk", "path",
+    "process", "mainthread", "flush", "drain", "dispatch",   # engine internals: factory:process() hard-crashed the game
 )
 
 # --- Rule 5: container/collection field types. Reading one iterates C++ memory

@@ -116,18 +116,11 @@ registerHandler("onCharsUpdate", function()
         return ok and res
     end
 
-    -- ---- STRATEGY 1: queue then process() ----
-    local ok1 = pcall(function() return factory:createItem(itemData) end)
-    log("strategy1 createItem(gd) queued ok=" .. tostring(ok1))
-    local okP, produced = pcall(function() return factory:process() end)
-    log(("strategy1 process() -> ok=%s res=%s"):format(tostring(okP), tostring(produced)))
-    if okP and produced and grant(produced, "process()") then log("DONE") return end
-
-    -- ---- STRATEGY 2: mainThreadUpdate then process() ----
-    pcall(function() factory:mainThreadUpdate() end)
-    local okP2, produced2 = pcall(function() return factory:process() end)
-    log(("strategy2 mainThreadUpdate+process -> ok=%s res=%s"):format(tostring(okP2), tostring(produced2)))
-    if okP2 and produced2 and grant(produced2, "mainThreadUpdate+process") then log("DONE") return end
+    -- STRATEGIES 1 & 2 REMOVED -- factory:process() HARD CRASHED the game.
+    -- My own tools/gen_probes.py blocklists `process`, `update`, `run`, `execute`
+    -- as engine internals, and I bypassed that rule by hand-writing this probe.
+    -- Hand-written probes must obey the same safety rules as generated ones.
+    -- NEVER call: factory:process(), factory:mainThreadUpdate().
 
     -- ---- STRATEGY 3: 6-arg immediate form ----
     local okPos, pos = pcall(function() return char:getPosition() end)
@@ -155,6 +148,33 @@ registerHandler("onCharsUpdate", function()
             local ok, res = pcall(v[2])
             log(("strategy4 %s -> ok=%s res=%s"):format(v[1], tostring(ok), tostring(res)))
             if ok and res and grant(res, v[1]) then log("DONE") return end
+        end
+    end
+
+    -- ---- STRATEGY 5: let the INVENTORY do the minting ----
+    -- Inventory/InventorySection addItem variants are documented as taking a
+    -- quantity; given every other signature omits the leading subject, a
+    -- GameData-first form is plausible and costs nothing to test.
+    for _, v in ipairs({
+        { "inv:addItem(gd,1,true,false)", function() return inv:addItem(itemData, 1, true, false) end },
+        { "inv:addItem(gd,1)",            function() return inv:addItem(itemData, 1) end },
+        { "inv:addItem(gd)",              function() return inv:addItem(itemData) end },
+    }) do
+        local ok, res = pcall(v[2])
+        log(("strategy5 %s -> ok=%s res=%s"):format(v[1], tostring(ok), tostring(res)))
+        if ok and res then log("*** SUCCESS via " .. v[1] .. " ***") return end
+    end
+
+    -- ---- STRATEGY 6: a section may own the mint ----
+    local okS, sections = pcall(function() return inv.sections end)
+    if okS and type(sections) == "table" then
+        for i, sec in pairs(sections) do
+            if type(sec) == "userdata" and sec.addItem then
+                local ok, res = pcall(function() return sec:addItem(itemData, 1) end)
+                log(("strategy6 section[%s]:addItem(gd,1) -> ok=%s res=%s")
+                    :format(tostring(i), tostring(ok), tostring(res)))
+                if ok and res then log("*** SUCCESS via section addItem ***") return end
+            end
         end
     end
 
