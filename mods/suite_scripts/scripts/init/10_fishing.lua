@@ -252,8 +252,11 @@ if type(registerHandler) == "function" then
     log("input hook armed -- press F while a swimming character is selected")
 
     -- Timer: onCharsUpdate is the sim tick. Frame delta is not exposed, so v0
-    -- approximates with a tick count; the WSM will own real time later.
-    local TICKS_PER_SEC = 30
+    -- counts ticks. MEASURED from the live log: a "3s" cast completed in ~0.9s
+    -- with a 30/sec assumption, so onCharsUpdate actually fires ~100/sec.
+    -- (Fourth time a measurement corrected an assumption -- the WSM will own
+    -- real time properly rather than counting ticks.)
+    local TICKS_PER_SEC = 100
     local target = CFG.castSeconds * TICKS_PER_SEC
     registerHandler("onCharsUpdate", function()
         for name, s in pairs(Fishing.state) do

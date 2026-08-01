@@ -33,16 +33,54 @@ registerHandler("onCharsUpdate", function()
 
     log("============ MINT FINAL ============")
 
-    local container
-    do
-        local ok1, fac = pcall(function() return char:getFaction() end)
-        local ok2, gd = ok1 and pcall(function() return fac:getData() end)
-        if ok2 and gd then
-            local ok3, c = pcall(function() return gd.sourceContainer end)
-            if ok3 then container = c end
-        end
+    -- Reaching the item database. The faction->getData->sourceContainer route
+    -- worked for one character and returned nothing for another, so it is too
+    -- fragile to rely on. Try several routes and keep the first that can
+    -- actually answer getDataByName.
+    local function usable(c)
+        if not c then return false end
+        local ok, res = pcall(function() return c:getDataByName("Bread", 4) end)
+        return ok and res ~= nil
     end
-    if not container then log("no GameDataContainer") return end
+
+    local container
+    local routes = {
+        { "GameWorld.gamedata", function() return getGameWorld().gamedata end },
+        { "GameWorld.leveldata", function() return getGameWorld().leveldata end },
+        { "GameWorld.savedata", function() return getGameWorld().savedata end },
+        { "faction:getData().sourceContainer", function()
+            return char:getFaction():getData().sourceContainer end },
+        { "faction.data.sourceContainer", function()
+            return char:getFaction().data.sourceContainer end },
+    }
+    for _, r in ipairs(routes) do
+        local ok, c = pcall(r[2])
+        local good = ok and usable(c)
+        log(("route %-38s ok=%s usable=%s"):format(r[1], tostring(ok), tostring(good)))
+        if good then container = c break end
+    end
+
+    if not container then
+        -- Nothing answered. Dump what GameWorld.gamedata exposes so we can find
+        -- the real lookup method instead of guessing again.
+        local okG, mgr = pcall(function() return getGameWorld().gamedata end)
+        if okG and mgr then
+            log("introspecting GameWorld.gamedata:")
+            local mt = getmetatable(mgr)
+            local idx = type(mt) == "table" and rawget(mt, "__index")
+            for _, src in ipairs({ mt, type(idx) == "table" and idx or nil }) do
+                if type(src) == "table" then
+                    pcall(function()
+                        for k, v in pairs(src) do
+                            log(("   %s : %s"):format(tostring(k), type(v)))
+                        end
+                    end)
+                end
+            end
+        end
+        log("no usable GameDataContainer")
+        return
+    end
 
     -- ---- FISH HUNT: does vanilla already have a fish item? ----
     log("--- fish item search (category 4) ---")
