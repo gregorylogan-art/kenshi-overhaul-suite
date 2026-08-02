@@ -148,7 +148,12 @@ end
 -- not. Set ALLOW_XP = true only when testing deliberately, on an expendable
 -- character.
 -- ############################################################################
-local ALLOW_XP = false
+-- ISOLATION TEST A (2026-08-01): re-enabled ALONE, with junk grants still OFF.
+-- Baseline confirmed stable first: food-only granting, no console reloads, gave
+-- 1 cast = 1 fish with a working inventory and stats page. So if the character
+-- breaks now, XP is the cause; if it stays healthy, the fault is in the junk
+-- item path. One variable at a time.
+local ALLOW_XP = true
 
 function Fishing.grantXp(character)
     if not ALLOW_XP then return "xp disabled (suspected character corruption)" end
