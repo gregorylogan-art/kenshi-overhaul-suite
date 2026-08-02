@@ -132,7 +132,26 @@ end
 
 -- Grant XP for a completed cast and REPORT it, so we can see the skill tab
 -- actually move rather than trusting that it did.
+-- ############################################################################
+-- XP GRANTING IS DISABLED -- SUSPECTED CHARACTER CORRUPTION
+--
+-- Symptom (Greg, twice): the character stops responding to click/move orders
+-- and their STATS PAGE READS EMPTY, while the rest of the GUI and the game keep
+-- working normally. That is the character's CharStats being broken, not a game
+-- fault -- and xpStat_eventBased is the ONLY call we make that writes into
+-- character internals.
+--
+-- Aggravating factor: duplicate handlers meant it fired TWICE per catch, so
+-- four stats x two copies = eight writes per cast.
+--
+-- Disabled until proven safe. Fishing works fine without it; a broken save does
+-- not. Set ALLOW_XP = true only when testing deliberately, on an expendable
+-- character.
+-- ############################################################################
+local ALLOW_XP = false
+
 function Fishing.grantXp(character)
+    if not ALLOW_XP then return "xp disabled (suspected character corruption)" end
     local okS, stats = pcall(function() return character:getStats() end)
     if not okS or not stats then return "no stats" end
 

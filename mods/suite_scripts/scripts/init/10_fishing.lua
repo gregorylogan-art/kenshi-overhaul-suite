@@ -199,6 +199,25 @@ local FISH_PREFERENCE = {
     "Dried Fish",   -- vanilla fallback
 }
 
+-- ############################################################################
+-- JUNK GRANTING DISABLED -- SUSPECTED MALFORMED ITEMS BREAK THE INVENTORY GUI
+--
+-- Symptom (Greg): character stops taking orders, INVENTORY WILL NOT OPEN, and
+-- the stats screen flashes open then closes. Game and rest of GUI keep running.
+-- That reads as the inventory UI failing to RENDER something, not as broken
+-- stats.
+--
+-- Suspect: we mint everything with createItem(gd, hand, nil,nil, LEVEL=0, nil).
+-- Category-4 FOOD (Dried Fish / Raw Fish / Small Fish) displays perfectly, but
+-- clothing and misc (Straw Hat, Rag Loincloth, Wooden Bowl, Cup, Book -- cat 3
+-- and friends) may need a real level or the GameData slots we pass as nil.
+-- Weapons already proved this: they return nil at every level.
+--
+-- Until it is understood, junk grants are OFF and only proven-safe food is
+-- granted. A junk pull now yields nothing rather than risking the save.
+-- ############################################################################
+local ALLOW_JUNK_GRANT = false
+
 local JUNK_CANDIDATES = {
     -- confirmed resolving
     -- "Iron Club" REMOVED: createItem returns nil at every level for weapons
@@ -218,7 +237,7 @@ function Fishing.tryCatch(character)
     if r < CFG.pctNothing then
         return false, nil, false
     end
-    if r < CFG.pctNothing + CFG.pctJunk then
+    if r < CFG.pctNothing + CFG.pctJunk and ALLOW_JUNK_GRANT then
         -- Build the pool once, keeping only names that genuinely resolve, so a
         -- bad guess degrades to "fewer junk types" instead of a failed grant.
         if not JUNK_POOL then
