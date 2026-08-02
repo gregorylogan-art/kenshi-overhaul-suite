@@ -1017,6 +1017,18 @@ local function barUpdate(s, character, frac, caption)
     if not bar then return end
     local p = readPos(character)
     if p then
+        -- ONE-TIME DIAGNOSTIC. Which axis is "up" in Kenshi is still unconfirmed,
+        -- and BAR_HEIGHT is applied to Y on that assumption. Logging the raw
+        -- position once lets it be checked against the terrainH already printed
+        -- in the SURVEY line: if y is close to terrainH then Y is up and the
+        -- offset is correct; if z matches instead, the offset is on the wrong
+        -- axis and the bar is floating sideways rather than overhead.
+        -- One log line, not per-frame spam.
+        if not Fishing._barPosLogged then
+            Fishing._barPosLogged = true
+            log(("bar position basis: x=%.1f y=%.1f z=%.1f  (+%.1f on Y)")
+                :format(p.x, p.y or 0, p.z, BAR_HEIGHT))
+        end
         pcall(function()
             bar:setPosition({ x = p.x, y = (p.y or 0) + BAR_HEIGHT, z = p.z })
         end)
