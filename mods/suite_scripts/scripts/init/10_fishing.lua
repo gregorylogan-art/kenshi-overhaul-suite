@@ -570,7 +570,11 @@ function Fishing.readSkill(character, key)
     if not id then return 0 end
     local stats = select(2, pcall(function() return character:getStats() end))
     if not stats then return 0 end
-    local ok, v = pcall(function() return stats:getStat(id, false) end)
+    -- unmodified=TRUE: we want the character's real skill, not the value after
+    -- encumbrance/hunger penalties. Reading modified made skills appear to FALL
+    -- as junk filled the pack, which would have fed distorted numbers into the
+    -- odds curve.
+    local ok, v = pcall(function() return stats:getStat(id, true) end)
     if ok and type(v) == "number" then return v end
     return 0
 end
@@ -598,7 +602,15 @@ end
 -- 1 cast = 1 fish with a working inventory and stats page. So if the character
 -- breaks now, XP is the cause; if it stays healthy, the fault is in the junk
 -- item path. One variable at a time.
-local ALLOW_XP = true
+-- XP DISABLED -- PRIME SUSPECT for the broken character.
+-- Evidence: Fishing.testGrant (items, NO xp) left the inventory and stats
+-- screens working. Fishing (items + XP) broke the character on the 4th cast,
+-- and Greg confirms stats WERE increasing every time -- so xpStat_eventBased
+-- was firing, which it never did before the merge (grantXp was nil).
+-- xpStat_eventBased is the only call we make that writes into character
+-- internals, and the symptom is character-internal: no orders, no inventory,
+-- no stats page, world unaffected.
+local ALLOW_XP = false
 
 function Fishing.grantXp(character)
     if not ALLOW_XP then return "xp disabled (suspected character corruption)" end
@@ -610,9 +622,9 @@ function Fishing.grantXp(character)
         local id = Fishing.STAT[key]
         local amount = Fishing.SKILL_CFG.xpPerCast[key]
         if id and amount then
-            local before = select(2, pcall(function() return stats:getStat(id, false) end))
+            local before = select(2, pcall(function() return stats:getStat(id, true) end))
             local ok, err = pcall(function() stats:xpStat_eventBased(id, amount) end)
-            local after = select(2, pcall(function() return stats:getStat(id, false) end))
+            local after = select(2, pcall(function() return stats:getStat(id, true) end))
             if ok then
                 parts[#parts + 1] = ("%s %.3f->%.3f"):format(key, before or -1, after or -1)
             else
