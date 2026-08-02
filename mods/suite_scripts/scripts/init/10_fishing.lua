@@ -73,6 +73,11 @@ local CFG = {
     garbageOdds = 0.40,
     logKeycodes = false,
 
+    -- Floating "what is this character doing" bar over the fisher's head.
+    -- Greg: "without lua up its hard to know if im fishing or not."
+    -- Kill switch: Fishing.setBar(false) if it ever misbehaves in the tick.
+    showBar = true,
+
     -- DESIGN (Greg, 2026-08-01): fish while WADING, not while SWIMMING.
     -- Swimming locks the character's animation state, so no fishing animation
     -- can ever play there -- and the suite design always said "free-form cast at
@@ -976,6 +981,66 @@ function Fishing.testBar(pct)
     return true
 end
 
+-- ---------------------------------------------------------------------------
+-- PER-CHARACTER CAST BAR
+-- ---------------------------------------------------------------------------
+-- Greg: "without lua up its hard to know if im fishing or not." That is the
+-- whole job here -- say WHO is doing WHAT and HOW FAR ALONG. No inventory slot,
+-- no output container (see #40); just the character's current action.
+--
+-- ONE BAR PER CHARACTER, CREATED ONCE, REUSED FOREVER. This is forced, not
+-- stylistic: the live probe showed FloatingProgressBar exposes no destroy() and
+-- no `destroyed` flag, so a bar made per cast could never be reclaimed. Bars are
+-- cached on the character's state and parked out of sight when idle.
+--
+-- Updated at ~10Hz rather than every tick. onCharsUpdate fires ~100/sec, and a
+-- 5-second bar does not need 500 updates -- 50 is already smoother than the eye
+-- resolves, and this code sits in the hot path for every fisher at once.
+local BAR_UPDATE_EVERY = 10
+local BAR_PARK_Y = -10000   -- no setVisible on this type; park it far below
+
+local function barFor(s)
+    if s.bar ~= nil then return s.bar or nil end
+    local okG, gui = pcall(function() return getForgottenGUI() end)
+    if not okG or not gui then s.bar = false return nil end
+    local okB, bar = pcall(function() return gui:createFloatingProgressBar() end)
+    if not okB or not bar then s.bar = false return nil end
+    s.bar = bar
+    return bar
+end
+
+-- Place the bar on the fisher and set its fill. frac is 0..1; the widget's own
+-- range is 0..1000 (Kenshi_ProgressBarPanel.layout).
+local function barUpdate(s, character, frac, caption)
+    if not CFG.showBar then return end
+    local bar = barFor(s)
+    if not bar then return end
+    local p = readPos(character)
+    if p then
+        pcall(function()
+            bar:setPosition({ x = p.x, y = (p.y or 0) + BAR_HEIGHT, z = p.z })
+        end)
+    end
+    if caption then pcall(function() bar:setCaption(caption) end) end
+    pcall(function() bar:setProgress(math.floor(frac * BAR_RANGE)) end)
+    pcall(function() bar:update() end)
+end
+
+local function barHide(s)
+    local bar = s.bar
+    if not bar then return end
+    pcall(function() bar:setProgress(0) end)
+    pcall(function() bar:setPosition({ x = 0, y = BAR_PARK_Y, z = 0 }) end)
+    pcall(function() bar:update() end)
+end
+
+-- Fishing.setBar(false) -- kill switch if the bar ever misbehaves in the tick.
+function Fishing.setBar(on)
+    CFG.showBar = (on == true)
+    log("cast bar -> " .. tostring(CFG.showBar))
+    return CFG.showBar
+end
+
 -- Fishing.setBarHeight(3) -- raise or lower the bar, live, while looking at it.
 -- Beats redeploying to guess a world-unit offset.
 function Fishing.setBarHeight(n)
@@ -1155,6 +1220,10 @@ local function beginCast(character, name)
     -- before use, so a character that dies or unloads mid-cast drops the cast
     -- instead of being dereferenced.
     s.character = character
+    -- One caption per cast, held for the whole cast rather than re-rolled on
+    -- every bar update -- a caption that flickered 10x/sec would be unreadable.
+    s.caption = pickCaption()
+    barUpdate(s, character, 0, s.caption)
     -- Anchor the cast to a spot. Moving away cancels it (see the tick handler):
     -- fishing is a deliberate act you stand still for, not something done at a jog.
     s.anchor = readPos(character)
@@ -1164,6 +1233,9 @@ end
 local function finishCast(character, name)
     local s = stateFor(name)
     s.casting, s.elapsed = false, 0
+    -- Park the bar the moment the cast ends. In auto it reappears immediately
+    -- on the next cast; the brief gap is the visual beat between casts.
+    barHide(s)
 
     local caught, itemId, isGarbage = Fishing.tryCatch(character)
     if not caught then
@@ -1307,6 +1379,7 @@ if type(registerHandler) == "function" then
         if s.auto then
             s.auto = false
             s.casting, s.elapsed, s.anchor = false, 0, nil
+                    barHide(s)
             log(name .. ": auto-fish OFF")
             return
         end
@@ -1358,10 +1431,12 @@ if type(registerHandler) == "function" then
                 -- twice its own duration, drop it rather than wedge the state.
                 if s.elapsed > target * 2 then
                     s.casting, s.elapsed, s.anchor = false, 0, nil
+                    barHide(s)
                     s.auto = false   -- a stuck cast must not silently re-arm
                     log(name .. ": cast timed out (stuck) -- reset")
                 elseif not ok or not character then
                     s.casting, s.anchor, s.character = false, nil, nil
+                    barHide(s)   -- a dead/unloaded fisher must not leave a bar behind
                     s.auto = false
                 else
                     -- STANDSTILL: drifting off the anchor cancels the cast.
@@ -1370,6 +1445,7 @@ if type(registerHandler) == "function" then
                         local d2 = now and distSq(now, s.anchor) or 0
                         if now and d2 > CFG.moveToleranceSq then
                             s.casting, s.elapsed, s.anchor = false, 0, nil
+                    barHide(s)
                             -- Walking away CANCELS auto-fishing, the same way a
                             -- Kenshi job drops when you order the character
                             -- somewhere else. Greg fishes under attack ("dust
@@ -1383,11 +1459,18 @@ if type(registerHandler) == "function" then
                                 :format(name, math.sqrt(d2), math.sqrt(CFG.moveToleranceSq)))
                         end
                     end
+                    -- Drive the bar at ~10Hz. Throttled because onCharsUpdate
+                    -- fires ~100/sec and this runs for every fisher at once; a
+                    -- 5s bar does not need 500 updates.
+                    if s.casting and (s.elapsed % BAR_UPDATE_EVERY == 0) then
+                        barUpdate(s, character, s.elapsed / target, nil)
+                    end
                     -- Water can also change underfoot mid-cast (waded out too deep).
                     if s.casting then
                         local can, why = Fishing.canFish(character)
                         if not can then
                             s.casting, s.elapsed, s.anchor = false, 0, nil
+                    barHide(s)
                             s.auto = false   -- waded out of fishable water
                             log(name .. ": cast broken -- " .. why)
                         elseif s.elapsed >= target then
