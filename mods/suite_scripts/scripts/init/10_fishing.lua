@@ -53,7 +53,12 @@ local CFG = {
     -- Standstill radius (squared, world units). Kenshi world units are large;
     -- ~2.5 units of drift is generous enough to survive idle sway but cancels
     -- on a real walk. Tune from the "cast broken -- you moved" logs.
-    moveToleranceSq = 6.0,
+    -- Standstill radius SQUARED. Was 6.0 (~2.4 units) -- far too tight for real
+    -- Kenshi play, where bandits and bone dogs mean you are rarely still. 100
+    -- (~10 units) tolerates repositioning and shuffle but still cancels on a
+    -- genuine walk. The break message now logs the ACTUAL drift, so tune from
+    -- those numbers rather than from my guess at world scale.
+    moveToleranceSq = 100.0,
     baseChance  = 0.25,
     garbageOdds = 0.40,
     logKeycodes = false,
@@ -588,18 +593,39 @@ if type(registerHandler) == "function" then
                 -- the cast against a stranger's position, and printed the tally
                 -- under the caster's name. Skip entries that are not the
                 -- current selection rather than acting on them.
-                local okN, curName = ok and character and pcall(function() return character:getName() end)
-                if ok and character and okN and curName ~= name then
-                    -- different character selected: leave this cast alone
+                -- Resolve the selected character's name PROPERLY. This used to be
+                --     local okN, curName = ok and character and pcall(...)
+                -- but a Lua `and` expression truncates multiple returns to ONE
+                -- value, so curName was always nil, the caster check always
+                -- failed, every cast was skipped, and casts hung on
+                -- "already casting" forever -- never completing, never breaking.
+                local curName = nil
+                if ok and character then
+                    local okN, n = pcall(function() return character:getName() end)
+                    if okN then curName = n end
+                end
+
+                -- SAFETY VALVE: a cast may never hang. If it somehow outlives
+                -- twice its own duration, drop it rather than wedge the state.
+                if s.elapsed > target * 2 then
+                    s.casting, s.elapsed, s.anchor = false, 0, nil
+                    log(name .. ": cast timed out (stuck) -- reset")
+                elseif curName and curName ~= name then
+                    -- a different character is selected: leave this cast alone
                 elseif not ok or not character then
                     s.casting, s.anchor = false, nil
                 else
                     -- STANDSTILL: drifting off the anchor cancels the cast.
                     if s.anchor then
                         local now = readPos(character)
-                        if now and distSq(now, s.anchor) > CFG.moveToleranceSq then
+                        local d2 = now and distSq(now, s.anchor) or 0
+                        if now and d2 > CFG.moveToleranceSq then
                             s.casting, s.elapsed, s.anchor = false, 0, nil
-                            log(name .. ": cast broken -- you moved. hold still to fish.")
+                            -- Report the ACTUAL drift so the tolerance is tuned
+                            -- from measurement rather than my guess at Kenshi's
+                            -- world-unit scale.
+                            log(("%s: cast broken -- moved %.1f units (tolerance %.1f)")
+                                :format(name, math.sqrt(d2), math.sqrt(CFG.moveToleranceSq)))
                         end
                     end
                     -- Water can also change underfoot mid-cast (waded out too deep).
