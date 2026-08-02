@@ -455,6 +455,69 @@ local function tryGrantItem(character, itemId)
 end
 
 -- ---------------------------------------------------------------------------
+-- TEST COMMANDS -- verify each part WITHOUT wading around hoping to see things.
+-- Blind play-testing is slow and proves nothing when a result is random; these
+-- answer each question directly and instantly.
+-- ---------------------------------------------------------------------------
+
+-- Fishing.status() -- is everything wired? Answers in one line each.
+function Fishing.status()
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    log("---------- FISHING STATUS ----------")
+    log("selected character : " .. (ok and c and tostring((select(2, pcall(function() return c:getName() end)))) or "NONE (click one)"))
+    if ok and c then
+        local can, why = Fishing.canFish(c)
+        log("can fish now       : " .. tostring(can) .. "  (" .. tostring(why) .. ")")
+    end
+    log("junk granting      : " .. tostring(ALLOW_JUNK_GRANT))
+    log("skill model wired  : " .. tostring(Fishing.computeOdds ~= nil))
+    log("xp granting        : " .. tostring(Fishing.grantXp ~= nil))
+    log("fish item in use   : " .. tostring(Fishing._fishName or "(unresolved)"))
+    if Fishing.computeOdds and ok and c then
+        local n, j, f = Fishing.computeOdds(
+            Fishing.readSkill(c, "precisionShooting"),
+            Fishing.readSkill(c, "swimming"),
+            Fishing.readSkill(c, "labouring"))
+        log(("live odds          : nothing %.1f%%  junk %.1f%%  fish %.1f%%")
+            :format(n * 100, j * 100, f * 100))
+    end
+    for nm, s in pairs(Fishing.state) do
+        log(("state[%s]: casting=%s fish=%d junk=%d"):format(nm, tostring(s.casting), s.caught, s.garbage))
+    end
+    log("-----------------------------------")
+end
+
+-- Fishing.testGrant("Straw Hat") -- grant ONE named item immediately.
+-- Proves the mint+grant path (and the room check) with no fishing, no waiting,
+-- no randomness. This is how junk gets tested instead of hoping for an 80% roll.
+function Fishing.testGrant(itemName)
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then log("testGrant: select a character first") return end
+    itemName = itemName or "Straw Hat"
+    local granted, how = tryGrantItem(c, itemName)
+    log(("testGrant(%q) -> %s (%s)"):format(itemName, granted and "OK" or "FAILED", tostring(how)))
+    return granted
+end
+
+-- Fishing.testRoll(200) -- roll the outcome table N times and report the actual
+-- distribution. Verifies the 5/80/15 split (and skill's effect on it) in one
+-- second instead of a hundred casts.
+function Fishing.testRoll(n)
+    n = n or 200
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then log("testRoll: select a character first") return end
+    local none, junk, fish = 0, 0, 0
+    for _ = 1, n do
+        local caught, _, isJunk = Fishing.tryCatch(c)
+        if not caught then none = none + 1
+        elseif isJunk then junk = junk + 1
+        else fish = fish + 1 end
+    end
+    log(("testRoll(%d): nothing %.1f%%  junk %.1f%%  fish %.1f%%")
+        :format(n, none / n * 100, junk / n * 100, fish / n * 100))
+end
+
+-- ---------------------------------------------------------------------------
 -- Cast lifecycle
 -- ---------------------------------------------------------------------------
 local function beginCast(character, name)
