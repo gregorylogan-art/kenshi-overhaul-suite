@@ -83,7 +83,7 @@ def main() -> int:
         on_disk = sorted(p.name for p in INITDIR.glob("*.lua"))
         missing = [f for f in on_disk if not any(f in l for l in loaded)]
         if missing:
-            print("  ⚠ on disk but NOT loaded:", ", ".join(missing))
+            print("  [!] on disk but NOT loaded:", ", ".join(missing))
 
     print(f"\nTAGS THAT PRODUCED OUTPUT: {', '.join(sorted(tags_seen)) or '(none)'}")
     # a script that loaded but never printed is the exact failure we hit
@@ -92,7 +92,7 @@ def main() -> int:
         guess = {"10_fishing": "FISH", "19_fishing_skill": "SKILL",
                  "05_wsm": "WSM", "24_cooking": "COOK"}.get(stem)
         if guess and guess not in tags_seen:
-            print(f"  ⚠ {s} loaded but produced NO [{guess}] output -- did the chunk run?")
+            print(f"  [!] {s} loaded but produced NO [{guess}] output -- did the chunk run?")
 
     # ---- 2. errors ----
     errs = [l for l in lines if re.search(r"\berror\b|\bERROR\b|attempt to|bad argument", l)]
@@ -121,12 +121,18 @@ def main() -> int:
             print("   ", l.split("[FISH]", 1)[-1].strip())
 
     # duplicate-handler detector: two divergent tallies is the signature
+    # A single script copy produces a MONOTONIC tally. Two copies keep separate
+    # state, so the printed value jumps BACKWARD (we saw fish=17 then fish=6).
+    # An increasing run like 2,3,4,5 is healthy -- an earlier version flagged it,
+    # which is the crying-wolf failure a diagnostic tool must not have.
     tallies = re.findall(r"totals fish=(\d+) junk=(\d+)", "\n".join(lines))
-    if len(tallies) >= 4:
-        recent = tallies[-6:]
-        fishvals = [int(a) for a, _ in recent]
-        if len(set(fishvals)) > 1 and max(fishvals) - min(fishvals) > 2:
-            print("\n⚠ DIVERGENT TALLIES -- duplicate handlers likely:", recent)
+    if len(tallies) >= 3:
+        fishvals = [int(a) for a, _ in tallies]
+        drops = [(fishvals[i - 1], fishvals[i])
+                 for i in range(1, len(fishvals)) if fishvals[i] < fishvals[i - 1]]
+        if drops:
+            print(f"\n[!] TALLY WENT BACKWARD {drops[:4]} -- duplicate handlers "
+                  f"(two script copies with separate state)")
 
     return 0
 
