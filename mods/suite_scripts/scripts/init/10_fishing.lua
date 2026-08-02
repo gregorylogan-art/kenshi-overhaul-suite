@@ -782,6 +782,8 @@ local CAPTIONS = {
     "Contemplating the river",
     "Still nothing",
     "The water is not cooperating",
+    "I've caught mudcrabs more fearsome than you...",   -- Greg
+    "Ah! A gift from the sea.",                         -- Greg
 }
 
 local function pickCaption()
@@ -902,8 +904,53 @@ function Fishing.testBar(pct)
     local okU, e3 = pcall(function() bar:update() end)
     if not okU then log("  update error: " .. tostring(e3)) end
 
-    log("testBar: done -- LOOK AT THE SCREEN. Where is it, and does it stay?")
+    -- ATTACH IT TO THE CHARACTER -- this is the "where the mining bar sits"
+    -- question, answered from the API rather than guessed.
+    --
+    -- FloatingProgressBar and ScreenLabel share a header (kenshi/gui/ScreenLabel.h),
+    -- and ScreenLabel carries exactly the fields Kenshi's own world-space bars
+    -- need:
+    --     trackingHandle (hand)     -- the object the label follows
+    --     trackingOffset (Vector3)  -- how high above it to float
+    -- What is NOT known is whether the Lua binding exposes those INHERITED
+    -- fields on FloatingProgressBar, since its own documented field list is just
+    -- caption / progress / bar. So introspect first and report, rather than
+    -- assigning blind into a userdata.
+    log("testBar: fields present on this bar:")
+    for _, f in ipairs({ "trackingHandle", "trackingOffset", "destroy",
+                         "destroyed", "setPosition", "caption", "progress" }) do
+        local okF, v = pcall(function() return bar[f] end)
+        log(("    %-16s %s"):format(f, okF and type(v) or "ERROR"))
+    end
+
+    local okSel, character = pcall(function() return getSelectedCharacter() end)
+    if okSel and character then
+        local okH, hand = pcall(function() return character:getHandle() end)
+        log("testBar: character:getHandle() -> " .. (okH and type(hand) or "unavailable"))
+        if okH and hand then
+            local okT, e = pcall(function() bar.trackingHandle = hand end)
+            log("testBar: set trackingHandle -> " .. (okT and "ok" or tostring(e)))
+            -- Float it above head height rather than inside the character.
+            local okO = pcall(function() bar.trackingOffset = { x = 0, y = 2, z = 0 } end)
+            log("testBar: set trackingOffset -> " .. (okO and "ok" or "failed"))
+            pcall(function() bar:update() end)
+        end
+    end
+
+    log("testBar: done -- LOOK AT THE SCREEN. Is it above the character?")
     return true
+end
+
+-- Fishing.clearBar() -- destroy the test bar.
+-- ScreenLabel exposes destroy() and a `destroyed` flag, so bars are NOT the
+-- unbounded leak I assumed when I refused to wire this into the tick. Proving
+-- teardown works is what makes per-cast bars safe.
+function Fishing.clearBar()
+    local bar = Fishing._bar
+    if not bar then log("clearBar: no bar") return end
+    local ok, err = pcall(function() bar:destroy() end)
+    log("clearBar: destroy() -> " .. (ok and "ok" or tostring(err)))
+    Fishing._bar = nil
 end
 
 -- Fishing.setAddAfterCreate(true) -- reverse the double-registration fix live,
