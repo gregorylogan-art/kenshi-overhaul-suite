@@ -201,7 +201,8 @@ local FISH_PREFERENCE = {
 
 local JUNK_CANDIDATES = {
     -- confirmed resolving
-    "Iron Club",            -- category 2
+    -- "Iron Club" REMOVED: createItem returns nil at every level for weapons
+    -- (category 2). Gear likely needs a different creation path than food.
     "Straw Hat",            -- category 3
     "Rag Loincloth",        -- category 3
     -- Greg's riverbed-trash picks: all equally worthless, which is the point
@@ -443,9 +444,21 @@ if Fishing._handlers and type(unregisterHandler) == "function" then
 end
 Fishing._handlers = {}
 
+-- GENERATION GUARD. Unregistering only works for handlers we tracked; any
+-- registered by a script version that predates this guard is untracked and
+-- immortal, which produced TWO live copies -- doubled casts, doubled grants and
+-- two divergent tallies. Every handler now checks the generation it was born in
+-- and silently retires when a newer load supersedes it, so even untrackable
+-- duplicates go quiet. (A one-off full restart is still needed to clear the
+-- pre-guard handlers already running.)
+Fishing._generation = (Fishing._generation or 0) + 1
+local MY_GEN = Fishing._generation
+local function stale() return Fishing._generation ~= MY_GEN end
+
 if type(registerHandler) == "function" then
     local typeLogged = false
     Fishing._handlers[#Fishing._handlers + 1] = registerHandler("onKeyDown", function(keyCode)
+        if stale() then return end
         -- Diagnose the argument's real type ONCE. v0.1 lost a run because the
         -- handler fired on F (scancode 33, confirmed in the log) but the equality
         -- test never matched -- a strong sign keyCode is not a plain number.
@@ -490,6 +503,7 @@ if type(registerHandler) == "function" then
     local TICKS_PER_SEC = 100
     local target = CFG.castSeconds * TICKS_PER_SEC
     Fishing._handlers[#Fishing._handlers + 1] = registerHandler("onCharsUpdate", function()
+        if stale() then return end
         for name, s in pairs(Fishing.state) do
             if s.casting then
                 s.elapsed = s.elapsed + 1
