@@ -59,6 +59,15 @@ log("=== 05_wsm.lua BEGIN ===")
 
 WSM = WSM or {}
 
+-- PUBLISH TO THE REAL GLOBAL TABLE. KenshiLua sandboxes each script, so a bare
+-- global write stays private to this file and the console cannot see WSM at all
+-- (proved live: `attempt to index global 'Fishing' (a nil value)` from the
+-- script editor). Writing through _G escapes the private env.
+--
+-- This is also the mechanism the WSM needs to be a genuine control plane rather
+-- than one file's private table: other suite scripts reach it as _G.WSM.
+pcall(function() _G.WSM = WSM end)
+
 -- ---------------------------------------------------------------------------
 -- CVARS -- all default 0/off. Nothing the suite adds is on by default.
 -- ---------------------------------------------------------------------------

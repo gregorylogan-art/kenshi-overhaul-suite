@@ -99,6 +99,25 @@ local CFG = {
 -- Suite state (proto-WSM). Durable truth lives here, not in the engine.
 -- ---------------------------------------------------------------------------
 Fishing = Fishing or {}
+
+-- PUBLISH TO THE REAL GLOBAL TABLE.
+--
+-- KenshiLua sandboxes every script (ScriptLoader.cpp, createSandboxEnv):
+--     env = {}; setmetatable(env, { __index = _G }); lua_setfenv(chunk, env)
+-- Reads fall through to _G, but WRITES land in the script's private table --
+-- there is no __newindex. So a bare `Fishing = ...` is invisible to everything
+-- outside this file, including the in-game console and script editor:
+--     [string "<editor>"]:1: attempt to index global 'Fishing' (a nil value)
+--
+-- That is why Fishing.probeBar() could not be run at all, and why a cross-file
+-- Fishing.grantXp read nil for an entire session while appearing to be wired up.
+--
+-- Writing THROUGH _G escapes the private env: `_G` itself resolves via __index
+-- to the real table, and an indexing assignment on it is an ordinary write.
+-- pcall-wrapped so a future sandbox that also protects _G degrades to "console
+-- commands unavailable" rather than failing the whole script load.
+pcall(function() _G.Fishing = Fishing end)
+
 Fishing._fishName = nil   -- cleared on reload: a newly enabled FCS mod must re-resolve
 Fishing.state = Fishing.state or {}      -- [charName] = { casting, elapsed, caught, garbage }
 
