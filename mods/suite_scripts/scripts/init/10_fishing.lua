@@ -58,7 +58,17 @@ local CFG = {
     -- (~10 units) tolerates repositioning and shuffle but still cancels on a
     -- genuine walk. The break message now logs the ACTUAL drift, so tune from
     -- those numbers rather than from my guess at world scale.
-    moveToleranceSq = 100.0,
+    -- MEASURED, not guessed (live log, two fishers wading, 2026-08-02):
+    --     moved 10.3 / 10.4 / 10.6 / 11.1 units  against tolerance 10.0
+    -- Four cancels in six seconds, every one within 11% of the threshold, while
+    -- the character was STANDING STILL in water. That is idle sway and water
+    -- drift, not walking -- Kenshi characters do not hold a position to the
+    -- centimetre when wading. The old value sat right on top of the noise floor,
+    -- so auto-fishing died constantly and read as "the G toggle is broken".
+    --
+    -- 30 units clears the observed ~11-unit noise with real margin while still
+    -- being a small fraction of what an actual walk covers in a 5s cast.
+    moveToleranceSq = 900.0,   -- 30 units
     baseChance  = 0.25,
     garbageOdds = 0.40,
     logKeycodes = false,
