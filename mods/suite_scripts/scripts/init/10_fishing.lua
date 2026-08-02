@@ -269,11 +269,15 @@ local FISH_PREFERENCE = {
 -- Watches inventory for a cooked fish appearing and rolls to spoil it into the
 -- burnt item. Names are resolved live, so whatever FCS actually produced wins.
 -- ---------------------------------------------------------------------------
+-- NOTE: getDataByName is CASE-SENSITIVE. FCS saved item 12 as "Cooked fish"
+-- (lowercase f), which is why "Cooked Fish" silently failed to resolve. Always
+-- list case variants rather than assuming title case.
 local COOK_CFG = {
     enabled     = true,
     burnChance  = 0.20,          -- 20% of cooks are ruined
-    cookedNames = { "Cooked Fish" },
-    burntNames  = { "Burnt Fish", "Burnt Meat", "Burned Fish" },
+    cookedNames = { "Cooked fish", "Cooked Fish" },
+    burntNames  = { "Burnt fish", "Burnt Fish", "Burnt meat", "Burnt Meat",
+                    "Burned fish", "Burned Fish" },
 }
 
 local ITEM_NAMES = {
