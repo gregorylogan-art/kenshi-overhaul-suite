@@ -240,6 +240,13 @@ local FISH_PREFERENCE = {
 -- ############################################################################
 local ALLOW_JUNK_GRANT = true   -- TEST B: re-enabled WITH the hasRoomForItem() guard in place
 
+-- Call addItem AFTER createItem? Default NO -- createItem's second argument is
+-- the inventory handle, so the item is already placed and addItem registered it
+-- a second time. See the block in tryGrantItem. Kept as a flag purely so it is
+-- one command to reverse (Fishing.setAddAfterCreate(true)) if items stop
+-- appearing, rather than a redeploy.
+local ADD_AFTER_CREATE = false
+
 local JUNK_CANDIDATES = {
     -- confirmed resolving
     -- "Iron Club" REMOVED: createItem returns nil at every level for weapons
@@ -473,26 +480,45 @@ local function tryGrantItem(character, itemId)
         return false, "createItem returned nil at every level"
     end
 
-    -- addItem(item, quantity, dropOnFail, destroyOnFail).
+    -- ####################################################################
+    -- WE WERE REGISTERING EVERY ITEM TWICE. This is issue #21's real cause.
     --
-    -- We used to pass dropOnFail=TRUE, destroyOnFail=FALSE -- i.e. "if it does
-    -- not fit, drop it on the ground". The character doing the fishing is
-    -- STANDING IN WATER, so that asked the engine to place a world object at a
-    -- position that may have no valid ground, every time a pack filled up.
-    -- That fits issue #21 far better than any single bad item: the freeze was
-    -- DETERMINISTIC on cast 4 (unseeded RNG replays the same junk sequence, so
-    -- the pack fills at the same point every run), it broke the character AND
-    -- both of its detail screens rather than just the inventory layout, and it
-    -- only ever happened while fishing.
+    -- createItem(gameData, HAND, ...) -- the second argument is the
+    -- inventory handle, i.e. the DESTINATION. The item is created directly
+    -- INTO the inventory. We then called addItem(item, ...) on the very same
+    -- inventory, registering one engine object in one container twice.
     --
-    -- Inverted: if it does not fit, DESTROY it. A refused catch is correct,
-    -- honest behaviour -- no orphan, no ground clutter, no drop-into-water.
+    -- Greg reported this in plain sight and I discounted it as a duplicate-
+    -- handler artefact: "its for sure 2 items everytime successful". It was
+    -- literal. The log then confirmed it arithmetically -- 11 successful
+    -- grants completely filled a pack, which 11 items cannot do but 22 can,
+    -- and the pack reported hasRoomForItem=false on grant 8 of 11.
+    --
+    -- Double-registration corrupts the inventory's internal layout, which is
+    -- why the CHARACTER broke rather than just the item list: no move orders,
+    -- inventory refusing to open, stats screen flashing shut. Neither call
+    -- ever returned an error, so nothing surfaced -- both "succeeded".
+    --
+    -- Previous theories, both now dead: XP writes (freeze reproduced with XP
+    -- off) and drop-into-water (dropOnFail is false now, and the log shows a
+    -- clean refusal at grant 8 with no mint at all -- the room check did its
+    -- job and the character broke anyway).
+    --
+    -- createItem placed the item. Do not place it again.
+    -- ####################################################################
+    if not ADD_AFTER_CREATE then
+        return true, ITEM_NAMES[itemId] or itemId
+    end
+
+    -- Retained behind a flag ONLY so this is one command to reverse if items
+    -- stop appearing: Fishing.setAddAfterCreate(true).
+    -- addItem(item, quantity, dropOnFail, destroyOnFail). dropOnFail stays
+    -- FALSE -- a fishing character stands in water, and asking the engine to
+    -- place a world object there is its own hazard.
     local okAdd, res = pcall(function() return inv:addItem(item, 1, false, true) end)
     if okAdd and res then
         return true, ITEM_NAMES[itemId] or itemId
     end
-    -- addItem returning false is usually NO ROOM -- normal game behaviour once a
-    -- pack fills with junk, not a code fault. Say so rather than crying bug.
     if okAdd then
         return false, "no room in inventory (drop some junk)"
     end
@@ -660,7 +686,15 @@ end
 -- stays off for exactly one run so the drop-into-water fix is tested as a single
 -- variable, then goes back on. Fishing.setXp(true) flips it live -- no redeploy,
 -- no reload, so both tests fit in one session.
-local ALLOW_XP = false
+local ALLOW_XP = true
+
+-- Fishing.setAddAfterCreate(true) -- reverse the double-registration fix live,
+-- for the single case where items stop appearing in the inventory at all.
+function Fishing.setAddAfterCreate(on)
+    ADD_AFTER_CREATE = (on == true)
+    log("addItem-after-createItem -> " .. tostring(ADD_AFTER_CREATE))
+    return ADD_AFTER_CREATE
+end
 
 -- Fishing.setXp(true|false) -- toggle XP granting at runtime.
 function Fishing.setXp(on)
