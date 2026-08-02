@@ -473,7 +473,21 @@ local function tryGrantItem(character, itemId)
         return false, "createItem returned nil at every level"
     end
 
-    local okAdd, res = pcall(function() return inv:addItem(item, 1, true, false) end)
+    -- addItem(item, quantity, dropOnFail, destroyOnFail).
+    --
+    -- We used to pass dropOnFail=TRUE, destroyOnFail=FALSE -- i.e. "if it does
+    -- not fit, drop it on the ground". The character doing the fishing is
+    -- STANDING IN WATER, so that asked the engine to place a world object at a
+    -- position that may have no valid ground, every time a pack filled up.
+    -- That fits issue #21 far better than any single bad item: the freeze was
+    -- DETERMINISTIC on cast 4 (unseeded RNG replays the same junk sequence, so
+    -- the pack fills at the same point every run), it broke the character AND
+    -- both of its detail screens rather than just the inventory layout, and it
+    -- only ever happened while fishing.
+    --
+    -- Inverted: if it does not fit, DESTROY it. A refused catch is correct,
+    -- honest behaviour -- no orphan, no ground clutter, no drop-into-water.
+    local okAdd, res = pcall(function() return inv:addItem(item, 1, false, true) end)
     if okAdd and res then
         return true, ITEM_NAMES[itemId] or itemId
     end
