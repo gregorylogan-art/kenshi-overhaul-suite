@@ -766,6 +766,57 @@ end
 -- no reload, so both tests fit in one session.
 local ALLOW_XP = true
 
+-- ---------------------------------------------------------------------------
+-- CAST CAPTIONS
+-- ---------------------------------------------------------------------------
+-- Greg wants the bar to be funny. Kenshi's own voice is deadpan misery, so
+-- these lean bored and faintly disgusted rather than jokey.
+-- "smells like dogwater" is Greg's; more of his are expected -- add them here,
+-- this list is meant to grow.
+local CAPTIONS = {
+    "Fishing...",
+    "smells like dogwater",          -- Greg
+    "Definitely a fish this time",
+    "Something touched it",
+    "That was a boot",
+    "Contemplating the river",
+    "Still nothing",
+    "The water is not cooperating",
+}
+
+local function pickCaption()
+    return CAPTIONS[math.random(#CAPTIONS)] or "Fishing..."
+end
+
+-- ---------------------------------------------------------------------------
+-- Fishing.unstick() -- try to recover a character whose GUI has locked up
+-- ---------------------------------------------------------------------------
+-- The recurring #21/#37 symptom is a character that will not take orders, an
+-- inventory that will not open, and a stats screen that flashes shut -- while
+-- the world keeps running. That reads much more like a WEDGED GUI than a
+-- corrupted character, and ForgottenGUI exposes exactly the levers to test it:
+--     closeAllInventories() / closeAllCharacterStatsWindows() / closeAllWindows()
+--
+-- If this recovers a frozen character, the freeze is a stuck window rather than
+-- data corruption -- which would be very good news, and would redirect #37
+-- entirely. If it does nothing, we have cheaply ruled the theory out.
+--
+-- Read-ish and reversible: these only close windows the player can reopen.
+function Fishing.unstick()
+    local okG, gui = pcall(function() return getForgottenGUI() end)
+    if not okG or not gui then
+        log("unstick: getForgottenGUI() unavailable")
+        return false
+    end
+    for _, m in ipairs({ "closeAllInventories", "closeAllCharacterStatsWindows",
+                         "closeTradeWindow", "closeAllWindows" }) do
+        local ok, err = pcall(function() gui[m](gui) end)
+        log(("  %-32s -> %s"):format(m, ok and "ok" or ("error: " .. tostring(err))))
+    end
+    log("unstick: done -- try clicking the character now")
+    return true
+end
+
 -- Fishing.probeBar() -- can we show a real floating progress bar?
 --
 -- Greg wants the mining/ore-style bar on a cast: "i have no idea, i just press g
@@ -803,6 +854,56 @@ function Fishing.probeBar()
         log("    keys: " .. (table.concat(keys, ", "):sub(1, 200)))
     end
     log("=== end probe (nothing was drawn) ===")
+end
+
+-- ---------------------------------------------------------------------------
+-- Fishing.testBar() -- create ONE real progress bar and drive it by hand
+-- ---------------------------------------------------------------------------
+-- The probe confirmed the route: getForgottenGUI() -> userdata, and
+-- ForgottenGUI:createFloatingProgressBar() -> FloatingProgressBar with
+-- setCaption / setProgress / update.
+--
+-- Still NOT wired into the cast, deliberately. Two unknowns remain that only a
+-- live look can answer, and both matter before this runs 100x/sec in the tick:
+--   1. WHERE does it draw? createFloatingProgressBar takes no position and no
+--      character, unlike createFloatingImage(image, top, left, w, h, layer).
+--   2. Does it EVER go away? The type has a _DESTRUCTOR but ForgottenGUI
+--      exposes no remove/hide, so a bar per cast could accumulate forever.
+--
+-- One bar is created and cached, so repeat calls reuse it rather than leaking.
+-- Log-as-cursor on every step: a hard freeze names the call that caused it.
+function Fishing.testBar(pct)
+    pct = tonumber(pct) or 0.5
+
+    if not Fishing._bar then
+        log("testBar: getForgottenGUI()")
+        local okG, gui = pcall(function() return getForgottenGUI() end)
+        if not okG or not gui then log("  FAILED: " .. tostring(gui)) return false end
+
+        log("testBar: gui:createFloatingProgressBar()")
+        local okB, bar = pcall(function() return gui:createFloatingProgressBar() end)
+        if not okB or not bar then log("  FAILED: " .. tostring(bar)) return false end
+        Fishing._bar = bar
+        log("  created, type=" .. type(bar))
+    else
+        log("testBar: reusing cached bar (not creating a second one)")
+    end
+
+    local bar = Fishing._bar
+    log("testBar: setCaption()")
+    local okC, e1 = pcall(function() bar:setCaption(pickCaption()) end)
+    if not okC then log("  setCaption error: " .. tostring(e1)) end
+
+    log("testBar: setProgress(" .. pct .. ")")
+    local okP, e2 = pcall(function() bar:setProgress(pct) end)
+    if not okP then log("  setProgress error: " .. tostring(e2)) end
+
+    log("testBar: update()")
+    local okU, e3 = pcall(function() bar:update() end)
+    if not okU then log("  update error: " .. tostring(e3)) end
+
+    log("testBar: done -- LOOK AT THE SCREEN. Where is it, and does it stay?")
+    return true
 end
 
 -- Fishing.setAddAfterCreate(true) -- reverse the double-registration fix live,
