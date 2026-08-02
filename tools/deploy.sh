@@ -17,7 +17,21 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GAME="/d/SteamLibrary/steamapps/common/Kenshi/mods/KenshiLua/scripts"
-PY="/d/Epic Games/UE_5.7/Engine/Binaries/ThirdParty/Python3/Win64/python.exe"
+# Interpreter candidates, first working one wins. `python` on PATH is a Windows
+# Store alias stub that prints an install advert and exits non-zero, so it is
+# deliberately NOT trusted -- it is tried last and only accepted if it actually
+# reports a version.
+PY_CANDIDATES=(
+  "/d/Epic Games/UE_5.7/Engine/Binaries/ThirdParty/Python3/Win64/python.exe"
+  "/c/Users/grego/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
+)
+PY=""
+for cand in "${PY_CANDIDATES[@]}"; do
+  if [[ -x "$cand" ]] && "$cand" -V >/dev/null 2>&1; then PY="$cand"; break; fi
+done
+if [[ -z "$PY" ]] && command -v python3 >/dev/null 2>&1 && python3 -V >/dev/null 2>&1; then
+  PY="$(command -v python3)"
+fi
 FORCE="${1:-}"
 
 echo "repo: $REPO"
@@ -30,7 +44,26 @@ if [[ ! -d "$GAME" ]]; then
 fi
 
 # ---- lint first: a bad deploy costs a restart at best, a save at worst ----
-if [[ -f "$REPO/tools/lua_check.py" && -x "$PY" ]]; then
+#
+# FAIL CLOSED. This used to read `if [[ -f lua_check.py && -x "$PY" ]]`, so a
+# missing or broken interpreter SKIPPED the entire gate in silence and deployed
+# unlinted code while still printing the usual success line. That is the same
+# fail-open shape as the hasRoomForItem bug this project just spent a day on:
+# a check that only refuses when it positively fails, and waves everything
+# through when it cannot run at all.
+#
+# A safety gate that cannot run is a FAILED gate, not an absent one.
+if [[ ! -f "$REPO/tools/lua_check.py" ]]; then
+  echo "ERROR: tools/lua_check.py missing -- refusing to deploy unlinted." >&2
+  echo "       Re-run with --force only if you know why it is gone." >&2
+  [[ "$FORCE" == "--force" ]] || exit 3
+elif [[ -z "$PY" ]]; then
+  echo "ERROR: no working python found -- cannot lint, refusing to deploy." >&2
+  echo "       Tried: ${PY_CANDIDATES[*]} and python3 on PATH." >&2
+  [[ "$FORCE" == "--force" ]] || exit 3
+fi
+
+if [[ -f "$REPO/tools/lua_check.py" && -n "$PY" ]]; then
   echo "--- lua_check ---"
   if ! "$PY" "$REPO/tools/lua_check.py"; then
     if [[ "$FORCE" != "--force" ]]; then
