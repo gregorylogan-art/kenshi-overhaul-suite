@@ -65,9 +65,39 @@ CONTAINER_TY = (
 )
 
 
+# Rule 5 REWRITTEN AS AN ALLOWLIST after a red-team review proved the blocklist
+# leaked. The blocklist matched doc STRINGS, but the docs record ELEMENT types --
+# so `Character.disguiseGUIFeedbacks` (documented "integer"),
+# `Character.whoSeesMeSneaking` ("hand"), `Character.activeEffects` ("integer")
+# and `Inventory.sections` ("InventorySection") all passed as safe and were read
+# live on a real game. They returned Lua tables, i.e. containers. We survived the
+# crash class four times by luck.
+#
+# Guilty until proven innocent: emit a member ONLY when its type is a known
+# scalar or a known single-object class. Anything unrecognised is excluded.
+SCALAR_TY = {
+    "number", "integer", "boolean", "string", "float", "double", "void",
+    "vector3", "quaternion", "lightuserdata",
+}
+
+SINGLE_OBJECT_TY = {
+    "gamedata", "gamedatacontainer", "character", "charstats", "charmovement",
+    "faction", "inventory", "item", "weapon", "building", "platoon",
+    "rootobject", "rootobjectbase", "timeofday", "hand",
+}
+
+
 def unsafe_field_type(ty: str) -> bool:
-    low = (ty or "").lower()
-    return any(c.lower() in low for c in CONTAINER_TY)
+    """True unless the type is a recognised scalar or single object."""
+    low = (ty or "").strip().lower().lstrip("const ").rstrip("*& ")
+    if not low:
+        return True
+    if low in SCALAR_TY or low in SINGLE_OBJECT_TY:
+        return False
+    # explicit container markers still rejected (belt and braces)
+    if any(c.lower() in low for c in CONTAINER_TY):
+        return True
+    return True   # unrecognised -> excluded
 
 
 # --- Rule 2: read-verb allowlist. Method must START with one of these.
@@ -101,6 +131,20 @@ def parse(md: str):
         if cells[0].startswith("---"):
             continue
         if section == "fields":
+            # REJECT PARSE-GARBAGE ROWS. The doc's own generator mangled some
+            # entries: the C++ Member cell comes through as "(lua_Integer",
+            # "first", "second" etc. Those same rows also carry a WRONG type --
+            # Character.disguiseGUIFeedbacks is documented "integer" but returns
+            # a Lua table (a container, i.e. the crash class). If the C++ member
+            # is not a plain identifier, the row cannot be trusted at all.
+            cpp = cells[1]
+            if not re.match(r'^~?\w+$', cpp or ""):
+                continue
+            # `first` / `second` are std::pair members -- the row describes a
+            # container element, not the member itself. Character.whoSeesMeSneaking
+            # is documented C++ member "first", type "hand", and returns a table.
+            if cpp in ("first", "second", "value_type", "key_type"):
+                continue
             classes[cls]["fields"].append((cells[0], cells[2], cells[3]))
         else:
             classes[cls]["methods"].append((cells[0], cells[2], cells[3]))

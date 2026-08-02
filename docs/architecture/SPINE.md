@@ -18,10 +18,20 @@ executed. This file records what actually happened when we ran it on a live game
    methods do not exist at all; 29 more take arguments the docs say they don't.
 2. **Container types hard-crash the game.** Reading `lektor<T*>` — as a field
    *or* a method return — kills the process. `pcall` does **not** catch it
-   (native access violation, not a Lua error). All container-typed members are
-   now excluded at generation time.
+   (native access violation, not a Lua error).
+   ⚠️ **"All container-typed members are excluded" was FALSE.** `gen_probes.py`
+   Rule 5 blocklists doc *strings*, but the docs record **element** types — so
+   `Character.disguiseGUIFeedbacks` (documented `integer`),
+   `Character.whoSeesMeSneaking` (`hand`), `Character.activeEffects` (`integer`)
+   and `Inventory.sections` (`InventorySection`) all passed the filter and were
+   read live. They returned `table:`. **We survived four reads of the crash class
+   by luck on one run.** Rule 5 must become an **allowlist** of known scalars.
 3. **`swimming` and `getWaterLevel()` disagree.** Observed live: `swimming = 1`
-   while `getWaterLevel() = 0`. **`swimming` is the trustworthy water signal.**
+   while `getWaterLevel() = 0` — and later `swimming = 12.91` while standing on
+   **dry land**. `swimming` is a **lagging accumulator**, not a boolean and not a
+   depth. **`getWaterLevel()` is the trustworthy signal** (0 land / 1–2 wading /
+   3 deep) and is what the shipped gate uses. *(This line previously asserted the
+   opposite; corrected after red-team review found code and doc disagreeing.)*
 4. **Items are identified by `GameData` objects**, not string ids — deduced from
    the argument errors (`getItem`, `hasItem`, `hasRoomForItem` all demand a
    `GameData`).
@@ -39,8 +49,15 @@ loadfile loadstring module newproxy next pairs pcall print rawequal rawget
 rawset require select setfenv setmetatable tonumber tostring type unpack xpcall
 ```
 
-⚠️ No `io` and no `math`/`os`/`string` in the function list — file writing is
-unavailable, so **the log is our only output channel**.
+⚠️ **CORRECTION (red-team review).** The absence of `math`/`string`/`table`/`io`
+from that list is an **artifact of the probe's own filter**, not a finding: the
+enumerator used `if type(v) == "function"`, and standard libraries are *tables*,
+so they were structurally invisible. Disproven by shipped code that works —
+`math.random`, `table.concat`, `table.sort`, and `("…"):format` are all in use.
+
+`io` is genuinely **untested**, so "the log is our only output channel" is an
+assumption, not a verified fact. Re-run the enumeration without the type filter
+to settle it.
 
 ## Object graph — all verified reachable
 
@@ -117,7 +134,14 @@ identified. A crash is a result, not a failure.
 
 ---
 
-## SOLVED: the item mint→grant chain (2026-08-01)
+## The item mint→grant chain (2026-08-01)
+
+> **Calibration (red-team):** these were reconstructed from argument errors,
+> which establish **arity and parameter TYPES only**. The parameter *names*
+> below are INFERRED -- nothing has verified that arg 2 of `addItem` is a
+> quantity, or that arg 5 of `createItem` is a level rather than a quality or
+> condition index. Treat the names as hypotheses until tested (e.g. grant
+> `addItem(item, 3, ...)` once and count with `countItems`).
 
 Reconstructed **entirely from argument errors** — the documented signatures were wrong at every step.
 

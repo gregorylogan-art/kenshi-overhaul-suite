@@ -84,6 +84,7 @@ local CFG = {
 -- Suite state (proto-WSM). Durable truth lives here, not in the engine.
 -- ---------------------------------------------------------------------------
 Fishing = Fishing or {}
+Fishing._fishName = nil   -- cleared on reload: a newly enabled FCS mod must re-resolve
 Fishing.state = Fishing.state or {}      -- [charName] = { casting, elapsed, caught, garbage }
 
 local function stateFor(name)
@@ -124,9 +125,9 @@ local function roll() return math.random() end
 
 -- ---------------------------------------------------------------------------
 -- CONTRACT: canFish
--- Water test uses `swimming`, NOT getWaterLevel -- the probe caught them
--- disagreeing (swimming=1 while getWaterLevel=0), so `swimming` is the
--- trustworthy signal.
+-- Water test uses waterLevel ONLY. `swimming` is a LAGGING ACCUMULATOR (read
+-- 12.91 on dry land), so gating on it would block fishing everywhere. This
+-- docstring previously claimed the opposite -- corrected after red-team review.
 -- ---------------------------------------------------------------------------
 -- Read every water-ish signal we have verified, so thresholds come from
 -- measurement instead of guesswork.
@@ -232,12 +233,35 @@ local JUNK_CANDIDATES = {
 local JUNK_POOL = nil   -- built on first use from what actually resolves
 
 function Fishing.tryCatch(character)
-    -- One roll against cumulative bands: 5% nothing | 80% junk | 15% fish.
+    -- SKILL NOW ACTUALLY APPLIES. The skill model existed but was called from
+    -- nowhere except simulate(), so XP rose and changed nothing -- the entire
+    -- "class fantasy" was inert. Bands are now derived from live skills when
+    -- 19_fishing_skill.lua is loaded, and fall back to the flat config if not.
+    local pctNothing, pctJunk = CFG.pctNothing, CFG.pctJunk
+    if Fishing.computeOdds and Fishing.readSkill then
+        local okOdds, n, j = pcall(function()
+            return Fishing.computeOdds(
+                Fishing.readSkill(character, "precisionShooting"),
+                Fishing.readSkill(character, "swimming"),
+                Fishing.readSkill(character, "labouring"))
+        end)
+        if okOdds and type(n) == "number" and type(j) == "number" then
+            pctNothing, pctJunk = n, j
+        end
+    end
+
+    -- One roll against cumulative bands: nothing | junk | fish (the remainder).
     local r = roll()
-    if r < CFG.pctNothing then
+    if r < pctNothing then
         return false, nil, false
     end
-    if r < CFG.pctNothing + CFG.pctJunk and ALLOW_JUNK_GRANT then
+    -- The junk band is TERMINAL. It used to fall through to fish whenever junk
+    -- could not be granted, which silently turned the shipped distribution into
+    -- 5% nothing / 95% FISH -- the exact opposite of the design, and a direct
+    -- contradiction of the safety banner above. A junk roll that cannot be
+    -- fulfilled now yields nothing.
+    if r < pctNothing + pctJunk then
+        if not ALLOW_JUNK_GRANT then return false, nil, false end
         -- Build the pool once, keeping only names that genuinely resolve, so a
         -- bad guess degrades to "fewer junk types" instead of a failed grant.
         if not JUNK_POOL then
@@ -250,6 +274,7 @@ function Fishing.tryCatch(character)
         if #JUNK_POOL > 0 then
             return true, JUNK_POOL[math.random(#JUNK_POOL)], true
         end
+        return false, nil, false   -- empty pool must NOT become a fish
     end
     -- Resolve the best available fish once; falls back down the preference list.
     if not Fishing._fishName then
@@ -347,8 +372,12 @@ lookupItemData = function(character, itemId)
     local gd = tryCat(ITEM_CATEGORY)
     local foundCat = ITEM_CATEGORY
     if not gd then
-        for cat = 0, 40 do
-            if cat ~= ITEM_CATEGORY then
+        -- Only the three MEASURED categories (2 weapons, 3 clothing, 4 food).
+        -- The old 0..40 sweep fed 41 fabricated enum values into a C++ arg on
+        -- every miss -- the same class gen_probes.py bans, and pcall cannot
+        -- catch a native fault.
+        for _, cat in ipairs({ 3, 2 }) do
+            do
                 gd = tryCat(cat)
                 if gd then foundCat = cat break end
             end
@@ -374,12 +403,31 @@ local function tryGrantItem(character, itemId)
     local okH, hand = pcall(function() return inv:getHandle() end)
     if not okH or not hand then return false, "no inventory handle" end
 
+    -- CHECK ROOM *BEFORE* MINTING. Previously we created the Item first and, if
+    -- addItem failed, simply dropped the reference -- but the Item was created
+    -- against the INVENTORY'S HANDLE, so nothing destroys it and Lua GC cannot
+    -- free an engine-side object. It stays registered to the inventory with no
+    -- slot.
+    --
+    -- LEADING THEORY for issue #21 (inventory GUI refuses to open): food is a
+    -- 1x1 item that essentially always places, while Straw Hat / Rag Loincloth
+    -- are multi-cell and are exactly what fails placement -- leaving orphaned
+    -- Items the GUI then cannot lay out. That fits the symptom far better than
+    -- "malformed clothing", and explains why food never misbehaved.
+    if inv.hasRoomForItem then
+        local okRoom, room = pcall(function() return inv:hasRoomForItem(gd) end)
+        if okRoom and room == false then
+            return false, "no room -- not minting (prevents orphaned items)"
+        end
+    end
+
     -- The number slot is a LEVEL. 0 works for food/materials but returns nil for
     -- weapons (Iron Club, category 2) -- gear presumably needs a real quality
-    -- level. Try a few until one yields an Item.
+    -- level. -1 was removed: feeding an out-of-domain value into a C++ level
+    -- parameter is the same fabricated-argument class gen_probes.py bans.
     local factory = getRootObjectFactory()
     local item
-    for _, lvl in ipairs({ 0, 1, -1, 2 }) do
+    for _, lvl in ipairs({ 0, 1, 2 }) do
         local ok, made = pcall(function()
             return factory:createItem(gd, hand, nil, nil, lvl, nil)
         end)
@@ -437,9 +485,15 @@ local function finishCast(character, name)
     -- Train what the activity uses: Labouring, Swimming, Precision Shooting and
     -- Perception (stat ids measured live). Precision Shooting is a deliberate
     -- back door -- same spirit as hauling heavy junk building Strength.
+    -- pcall-wrapped: grantXp can throw (its before/after values come from
+    -- select(2, pcall(...)), which yields an ERROR STRING on failure, and that
+    -- string then hits ("%.3f"):format). An unprotected throw here aborted the
+    -- whole catch before the item was ever granted -- the cast just evaporated
+    -- with no CAUGHT line.
     if Fishing.grantXp then
-        local xp = Fishing.grantXp(character)
-        if xp then log(name .. ": xp " .. tostring(xp)) end
+        local okXp, xp = pcall(Fishing.grantXp, character)
+        if okXp and xp then log(name .. ": xp " .. tostring(xp))
+        elseif not okXp then log(name .. ": xp ERROR " .. tostring(xp)) end
     end
 
     local granted, how = tryGrantItem(character, itemId)
@@ -528,7 +582,16 @@ if type(registerHandler) == "function" then
                 s.elapsed = s.elapsed + 1
 
                 local ok, character = pcall(function() return getSelectedCharacter() end)
-                if not ok or not character then
+                -- The tick must only act on the character who actually cast.
+                -- It previously used whoever was SELECTED, so clicking a
+                -- squadmate mid-cast put the fish in the wrong inventory, broke
+                -- the cast against a stranger's position, and printed the tally
+                -- under the caster's name. Skip entries that are not the
+                -- current selection rather than acting on them.
+                local okN, curName = ok and character and pcall(function() return character:getName() end)
+                if ok and character and okN and curName ~= name then
+                    -- different character selected: leave this cast alone
+                elseif not ok or not character then
                     s.casting, s.anchor = false, nil
                 else
                     -- STANDSTILL: drifting off the anchor cancels the cast.
