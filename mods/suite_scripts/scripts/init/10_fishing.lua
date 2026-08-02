@@ -256,9 +256,24 @@ end
 -- them automatically -- and until then it keeps working on vanilla Dried Fish.
 -- No code change needed on either side of the FCS session.
 local FISH_PREFERENCE = {
-    "Small Fish",   -- FCS (pending) -- the honest common catch
-    "Raw Fish",     -- FCS (pending) -- Raw Meat equivalent
+    "Small Fish",   -- FCS: 11-KenshiOverhaulSuite.mod
+    "Raw Fish",     -- FCS: 10-KenshiOverhaulSuite.mod
     "Dried Fish",   -- vanilla fallback, confirmed working
+}
+
+-- ---------------------------------------------------------------------------
+-- COOKING SINK -- implemented in LUA because FCS has no failure-chance field.
+-- Greg checked: recipes support ingredients but no "probability to burn".
+-- So the burn lives here instead, and the design survives intact.
+--
+-- Watches inventory for a cooked fish appearing and rolls to spoil it into the
+-- burnt item. Names are resolved live, so whatever FCS actually produced wins.
+-- ---------------------------------------------------------------------------
+local COOK_CFG = {
+    enabled     = true,
+    burnChance  = 0.20,          -- 20% of cooks are ruined
+    cookedNames = { "Cooked Fish" },
+    burntNames  = { "Burnt Fish", "Burnt Meat", "Burned Fish" },
 }
 
 local ITEM_NAMES = {
