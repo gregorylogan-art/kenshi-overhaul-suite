@@ -879,8 +879,23 @@ end
 --
 -- One bar is created and cached, so repeat calls reuse it rather than leaking.
 -- Log-as-cursor on every step: a hard freeze names the call that caused it.
+-- BAR RANGE IS 0..1000, NOT 0..1. Read straight from Kenshi's own layout,
+-- data/gui/layout/Kenshi_ProgressBarPanel.layout:
+--     <Widget type="ProgressBar" name="ProgressBar">
+--         <Property key="Range" value="1000"/>
+-- which also matches the binding's field type (`progress | integer`).
+--
+-- The first test passed 0.5 -- five hundredths of one percent of the bar, i.e.
+-- indistinguishable from empty. That layout file is the same widget the mining
+-- bar uses, so it is the authority here rather than my assumption of a 0..1
+-- fraction.
+local BAR_RANGE = 1000
+
 function Fishing.testBar(pct)
+    -- Accept either convention: <=1 is treated as a fraction and scaled up, so
+    -- testBar(0.5) and testBar(500) both mean half.
     pct = tonumber(pct) or 0.5
+    if pct <= 1 then pct = pct * BAR_RANGE end
 
     if not Fishing._bar then
         log("testBar: getForgottenGUI()")
@@ -901,7 +916,7 @@ function Fishing.testBar(pct)
     local okC, e1 = pcall(function() bar:setCaption(pickCaption()) end)
     if not okC then log("  setCaption error: " .. tostring(e1)) end
 
-    log("testBar: setProgress(" .. pct .. ")")
+    log(("testBar: setProgress(%d)  [range 0..%d]"):format(pct, BAR_RANGE))
     local okP, e2 = pcall(function() bar:setProgress(pct) end)
     if not okP then log("  setProgress error: " .. tostring(e2)) end
 
