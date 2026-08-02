@@ -126,6 +126,22 @@ end
 -- Deterministic-ish roll. Lua's math.random is fine for v0; a seeded stream
 -- comes with the WSM so catches are replayable.
 -- ---------------------------------------------------------------------------
+-- SEEDED. math.random was never seeded, so every session produced the IDENTICAL
+-- loot sequence (bowl, book, bowl, freeze -- twice in a row). That made the
+-- freeze perfectly reproducible, which was lucky for diagnosis but is wrong for
+-- play. os.time may be sandboxed away, so fall back to a game-derived value.
+do
+    local seed
+    local okT, t = pcall(function() return os.time() end)
+    if okT and type(t) == "number" then seed = t end
+    if not seed then
+        local okW, w = pcall(function() return getGameWorld() end)
+        if okW and w then seed = tonumber(tostring(w):match("%x+$") or "", 16) end
+    end
+    pcall(math.randomseed, seed or 20260802)
+    for _ = 1, 5 do pcall(math.random) end   -- discard the weak first values
+end
+
 local function roll() return math.random() end
 
 -- ---------------------------------------------------------------------------
@@ -399,6 +415,11 @@ lookupItemData = function(character, itemId)
 end
 
 local function tryGrantItem(character, itemId)
+    -- LOG-AS-CURSOR. A hard freeze leaves no error, so print the intent BEFORE
+    -- acting: whatever appears last in the log is what killed the game. This is
+    -- the same technique that identified the container crash class, and it is
+    -- how we will name the item behind the deterministic cast-4 freeze.
+    log("GRANT-ATTEMPT: " .. tostring(itemId))
     local okInv, inv = pcall(function() return character:getInventory() end)
     if not okInv or not inv then return false, "no inventory" end
 
@@ -419,11 +440,21 @@ local function tryGrantItem(character, itemId)
     -- are multi-cell and are exactly what fails placement -- leaving orphaned
     -- Items the GUI then cannot lay out. That fits the symptom far better than
     -- "malformed clothing", and explains why food never misbehaved.
-    if inv.hasRoomForItem then
-        local okRoom, room = pcall(function() return inv:hasRoomForItem(gd) end)
-        if okRoom and room == false then
-            return false, "no room -- not minting (prevents orphaned items)"
-        end
+    -- FAIL-CLOSED. The previous version only refused when the check explicitly
+    -- returned false -- so if hasRoomForItem errored, was absent, or returned
+    -- nil, we minted anyway and could still orphan an item. That matches what
+    -- Greg saw: a DETERMINISTIC freeze on cast 4 every session (math.random was
+    -- unseeded, so the same junk sequence repeats), i.e. one specific item that
+    -- would not fit. If we cannot PROVE there is room, we do not mint.
+    if not inv.hasRoomForItem then
+        return false, "hasRoomForItem absent -- refusing to mint (cannot prove room)"
+    end
+    local okRoom, room = pcall(function() return inv:hasRoomForItem(gd) end)
+    if not okRoom then
+        return false, "room check errored: " .. tostring(room)
+    end
+    if room ~= true then
+        return false, ("no room (hasRoomForItem=%s)"):format(tostring(room))
     end
 
     -- The number slot is a LEVEL. 0 works for food/materials but returns nil for
