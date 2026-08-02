@@ -240,12 +240,15 @@ local FISH_PREFERENCE = {
 -- ############################################################################
 local ALLOW_JUNK_GRANT = true   -- TEST B: re-enabled WITH the hasRoomForItem() guard in place
 
--- Call addItem AFTER createItem? Default NO -- createItem's second argument is
--- the inventory handle, so the item is already placed and addItem registered it
--- a second time. See the block in tryGrantItem. Kept as a flag purely so it is
--- one command to reverse (Fishing.setAddAfterCreate(true)) if items stop
--- appearing, rather than a redeploy.
-local ADD_AFTER_CREATE = false
+-- REVERTED TO TRUE -- this is the known-working grant path, do not flip it
+-- without evidence. I briefly defaulted it false on a double-registration
+-- theory whose entire support was an arithmetic argument ("11 grants filled a
+-- pack, so each must have yielded 2 items"). Greg then confirmed the duplication
+-- had ALREADY stopped in that run -- it was duplicate HANDLERS, cured by the
+-- generation guard plus a restart -- so 11 grants meant 11 items and the
+-- arithmetic proved nothing. Changing a working path on a disproven theory is
+-- how a real bug gets buried under a self-inflicted one.
+local ADD_AFTER_CREATE = true
 
 local JUNK_CANDIDATES = {
     -- confirmed resolving
@@ -419,6 +422,41 @@ lookupItemData = function(character, itemId)
     end
     gameDataCache[name] = gd or false
     return gd
+end
+
+-- ---------------------------------------------------------------------------
+-- PACK HEADROOM GATE  (issue #21)
+-- ---------------------------------------------------------------------------
+-- The observed failure, in Greg's words: "the inventory got full then the
+-- character was unusable" -- no move orders, inventory refusing to open, stats
+-- screen flashing shut, world running on normally.
+--
+-- The per-grant room check is NOT enough, and the log shows exactly why. Grant
+-- 8 of 11 was correctly refused with hasRoomForItem=false, and then grants
+-- 9, 10 and 11 SUCCEEDED -- because a 1x1 Small Fish still slots into gaps a
+-- multi-cell item cannot use. So the pack kept accepting items right at its
+-- boundary, and that boundary is where the character broke.
+--
+-- So stop fishing well BEFORE the boundary instead of walking up to it. The
+-- probe is a multi-cell clothing item: once one of those will no longer fit,
+-- the pack is effectively full even though 1x1 gaps remain, and we refuse the
+-- cast outright rather than dribbling small items into the last crevices.
+--
+-- Deliberately fail-OPEN: if the probe cannot be resolved we allow the cast,
+-- because tryGrantItem's own check is fail-CLOSED and nothing can be minted
+-- without proving room there. Layered that way, an unknown degrades to "no
+-- catch", never to "fishing is silently bricked".
+local HEADROOM_PROBE = "Straw Hat"
+
+function Fishing.hasPackHeadroom(character)
+    if not character then return true end
+    local okInv, inv = pcall(function() return character:getInventory() end)
+    if not okInv or not inv or not inv.hasRoomForItem then return true end
+    local gd = lookupItemData(character, HEADROOM_PROBE)
+    if not gd then return true end
+    local ok, room = pcall(function() return inv:hasRoomForItem(gd) end)
+    if not ok then return true end
+    return room == true
 end
 
 local function tryGrantItem(character, itemId)
@@ -816,6 +854,13 @@ local function beginCast(character, name)
     local can, why = Fishing.canFish(character)
     if not can then
         log(name .. ": cannot fish -- " .. why)
+        return
+    end
+    -- Pack fullness is checked BEFORE the 5-second cast, not after it, so the
+    -- refusal is immediate feedback rather than a wasted wait ending in nothing.
+    -- canFish stays purely about water state; this is a separate gate.
+    if not Fishing.hasPackHeadroom(character) then
+        log(name .. ": PACK FULL -- make space before fishing (issue #21 guard)")
         return
     end
     s.casting, s.elapsed = true, 0
