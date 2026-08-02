@@ -25,7 +25,29 @@
 -- ============================================================================
 
 local TAG = "[SKILL] "
-local function log(m) print(TAG .. tostring(m)) end
+
+-- DEFERRED LOGGING -- see 05_wsm.lua. print() during ScriptLoader's init pass is
+-- swallowed; the logger only captures once handlers are running. This file
+-- looked completely dead for two sessions purely because of that.
+local _pending = {}
+local _flushed = false
+local function log(m)
+    local s = TAG .. tostring(m)
+    if _flushed then print(s) else _pending[#_pending + 1] = s end
+end
+
+if type(registerHandler) == "function" then
+    local id
+    id = registerHandler("onCharsUpdate", function()
+        if _flushed then return end
+        _flushed = true
+        for _, s in ipairs(_pending) do print(s) end
+        _pending = {}
+        if type(unregisterHandler) == "function" then pcall(unregisterHandler, id) end
+    end)
+else
+    _flushed = true
+end
 
 -- HEARTBEAT: printed as the very first executable statement. The 2026-08-01
 -- session saw ScriptLoader report this file as "loaded" while it produced ZERO

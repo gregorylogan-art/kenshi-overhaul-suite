@@ -29,7 +29,31 @@
 -- ============================================================================
 
 local TAG = "[WSM] "
-local function log(m) print(TAG .. tostring(m)) end
+
+-- DEFERRED LOGGING -- print() during ScriptLoader's init pass GOES NOWHERE.
+-- Proven by elimination: 05_wsm and 19_fishing_skill both reported as "loaded"
+-- and produced zero output, while 10_fishing's only output came from a HANDLER.
+-- The logger is not capturing stdout yet when init scripts are executed. So
+-- queue anything logged at load time and flush it on the first tick.
+local _pending = {}
+local _flushed = false
+local function log(m)
+    local s = TAG .. tostring(m)
+    if _flushed then print(s) else _pending[#_pending + 1] = s end
+end
+
+if type(registerHandler) == "function" then
+    local id
+    id = registerHandler("onCharsUpdate", function()
+        if _flushed then return end
+        _flushed = true
+        for _, s in ipairs(_pending) do print(s) end
+        _pending = {}
+        if type(unregisterHandler) == "function" then pcall(unregisterHandler, id) end
+    end)
+else
+    _flushed = true   -- no handler system: print directly and hope
+end
 
 log("=== 05_wsm.lua BEGIN ===")
 

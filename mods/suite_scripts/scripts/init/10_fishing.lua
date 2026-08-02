@@ -217,7 +217,7 @@ local FISH_PREFERENCE = {
 -- Until it is understood, junk grants are OFF and only proven-safe food is
 -- granted. A junk pull now yields nothing rather than risking the save.
 -- ############################################################################
-local ALLOW_JUNK_GRANT = false
+local ALLOW_JUNK_GRANT = true   -- TEST B: re-enabled WITH the hasRoomForItem() guard in place
 
 local JUNK_CANDIDATES = {
     -- confirmed resolving
