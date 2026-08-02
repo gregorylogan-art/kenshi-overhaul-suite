@@ -790,6 +790,11 @@ local function pickCaption()
     return CAPTIONS[math.random(#CAPTIONS)] or "Fishing..."
 end
 
+-- How far above the fisher's position the bar floats. Tunable from one place
+-- because the correct value -- and even which axis is "up" in Kenshi -- is not
+-- yet confirmed. Fishing.setBarHeight(n) adjusts it live.
+BAR_HEIGHT = 2.0
+
 -- ---------------------------------------------------------------------------
 -- Fishing.unstick() -- try to recover a character whose GUI has locked up
 -- ---------------------------------------------------------------------------
@@ -916,41 +921,74 @@ function Fishing.testBar(pct)
     -- fields on FloatingProgressBar, since its own documented field list is just
     -- caption / progress / bar. So introspect first and report, rather than
     -- assigning blind into a userdata.
+    -- MEASURED (live run): FloatingProgressBar does NOT inherit ScreenLabel's
+    -- Lua surface, despite sharing its C++ header.
+    --     trackingHandle  nil        no auto-follow
+    --     trackingOffset  nil
+    --     destroy         nil        no teardown
+    --     destroyed       nil
+    --     setPosition     function   <- but we can place it ourselves
+    -- So the bar cannot be attached to a character and cannot be destroyed.
+    -- It CAN be positioned, and the tick already reads the fisher's position
+    -- every frame, so we drive it manually instead. Nothing was visible on the
+    -- first run because an unpositioned bar sits at world origin.
     log("testBar: fields present on this bar:")
-    for _, f in ipairs({ "trackingHandle", "trackingOffset", "destroy",
-                         "destroyed", "setPosition", "caption", "progress" }) do
+    for _, f in ipairs({ "setPosition", "setVisible", "visible", "setCaption",
+                         "progress", "caption", "update" }) do
         local okF, v = pcall(function() return bar[f] end)
         log(("    %-16s %s"):format(f, okF and type(v) or "ERROR"))
     end
 
+    -- Put it ON the fisher, using the same position read the cast anchor uses.
     local okSel, character = pcall(function() return getSelectedCharacter() end)
     if okSel and character then
-        local okH, hand = pcall(function() return character:getHandle() end)
-        log("testBar: character:getHandle() -> " .. (okH and type(hand) or "unavailable"))
-        if okH and hand then
-            local okT, e = pcall(function() bar.trackingHandle = hand end)
-            log("testBar: set trackingHandle -> " .. (okT and "ok" or tostring(e)))
-            -- Float it above head height rather than inside the character.
-            local okO = pcall(function() bar.trackingOffset = { x = 0, y = 2, z = 0 } end)
-            log("testBar: set trackingOffset -> " .. (okO and "ok" or "failed"))
+        local p = readPos(character)
+        if p then
+            -- Y-up is assumed; if the bar lands at the character's feet or
+            -- inside them, this offset is the knob (and tells us which axis
+            -- is up, which nothing so far has confirmed).
+            local target = { x = p.x, y = (p.y or 0) + BAR_HEIGHT, z = p.z }
+            local okP, e = pcall(function() bar:setPosition(target) end)
+            log(("testBar: setPosition(%.1f, %.1f, %.1f) -> %s")
+                :format(target.x, target.y, target.z, okP and "ok" or tostring(e)))
             pcall(function() bar:update() end)
+        else
+            log("testBar: could not read character position")
         end
     end
 
-    log("testBar: done -- LOOK AT THE SCREEN. Is it above the character?")
+    log("testBar: done -- LOOK AT THE SCREEN. Is it on the character now?")
     return true
 end
 
--- Fishing.clearBar() -- destroy the test bar.
--- ScreenLabel exposes destroy() and a `destroyed` flag, so bars are NOT the
--- unbounded leak I assumed when I refused to wire this into the tick. Proving
--- teardown works is what makes per-cast bars safe.
+-- Fishing.setBarHeight(3) -- raise or lower the bar, live, while looking at it.
+-- Beats redeploying to guess a world-unit offset.
+function Fishing.setBarHeight(n)
+    BAR_HEIGHT = tonumber(n) or 2.0
+    log("bar height -> " .. tostring(BAR_HEIGHT))
+    return BAR_HEIGHT
+end
+
+-- Fishing.clearBar() -- hide the test bar.
+--
+-- CORRECTION: I claimed destroy() existed because ScreenLabel has it. The live
+-- run says FloatingProgressBar does NOT expose it -- `destroy` reads nil, and
+-- calling it errors. So there is no teardown, which means the design rule is
+-- ONE bar per character, reused forever, never one per cast.
+--
+-- Hiding therefore has to be done by other means: setVisible if the binding has
+-- it, otherwise park the bar far below the world where it cannot be seen.
 function Fishing.clearBar()
     local bar = Fishing._bar
     if not bar then log("clearBar: no bar") return end
-    local ok, err = pcall(function() bar:destroy() end)
-    log("clearBar: destroy() -> " .. (ok and "ok" or tostring(err)))
-    Fishing._bar = nil
+    if type(bar.setVisible) == "function" then
+        local ok, err = pcall(function() bar:setVisible(false) end)
+        log("clearBar: setVisible(false) -> " .. (ok and "ok" or tostring(err)))
+    else
+        local ok = pcall(function() bar:setPosition({ x = 0, y = -10000, z = 0 }) end)
+        log("clearBar: no setVisible; parked below world -> " .. (ok and "ok" or "failed"))
+    end
+    pcall(function() bar:update() end)
 end
 
 -- Fishing.setAddAfterCreate(true) -- reverse the double-registration fix live,
