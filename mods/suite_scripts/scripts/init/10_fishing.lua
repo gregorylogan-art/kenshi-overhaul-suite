@@ -456,7 +456,18 @@ end
 -- because tryGrantItem's own check is fail-CLOSED and nothing can be minted
 -- without proving room there. Layered that way, an unknown degrades to "no
 -- catch", never to "fishing is silently bricked".
-local HEADROOM_PROBE = "Straw Hat"
+-- PROBE ITEM CHOICE IS NOT ARBITRARY. This was "Straw Hat" and the gate never
+-- fired once: the log shows eighteen consecutive grants refused with
+-- hasRoomForItem=false while hasPackHeadroom() kept answering true, so auto
+-- re-cast forever into a pack that could not take anything.
+--
+-- Straw Hat is category 3 (clothing/armour). Kenshi can place clothing in
+-- EQUIPMENT slots rather than the backpack grid, so "is there room for a hat"
+-- stays true long after the grid is solid. A clothing item is therefore the one
+-- thing that must never be used to measure grid space.
+--
+-- Book is category 4 (general goods), multi-cell, and can only live in the grid.
+local HEADROOM_PROBE = "Book"
 
 function Fishing.hasPackHeadroom(character)
     if not character then return true end
@@ -960,6 +971,18 @@ local function finishCast(character, name)
     log(("%s: CAUGHT %s%s | grant: %s (%s) | totals fish=%d junk=%d")
         :format(name, itemId, isGarbage and " (junk)" or "",
                 granted and "OK" or "FAILED", how, s.caught, s.garbage))
+
+    -- GROUND TRUTH BEATS ANY PROBE. A predictive gate can be wrong -- the
+    -- Straw Hat probe was, and auto re-cast eighteen times into a pack that
+    -- refused every single item. A grant that ACTUALLY failed for lack of room
+    -- is not a prediction, it is the pack itself answering.
+    --
+    -- Belt and braces on purpose: the headroom gate should stop us before we
+    -- ever get here, but when it does not, this cannot miss.
+    if not granted and type(how) == "string" and how:find("no room", 1, true) then
+        s.auto = false
+        log(name .. ": auto-fish STOPPED -- pack full (grant refused)")
+    end
 end
 
 -- AUTO-FISH re-arm. Kenshi's idiom is "give the order once and walk away", not
