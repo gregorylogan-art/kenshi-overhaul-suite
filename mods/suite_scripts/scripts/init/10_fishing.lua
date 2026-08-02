@@ -655,7 +655,19 @@ end
 -- xpStat_eventBased is the only call we make that writes into character
 -- internals, and the symptom is character-internal: no orders, no inventory,
 -- no stats page, world unaffected.
+-- UPDATE: XP is now EXONERATED, not merely suspected. The freeze reproduced on
+-- cast 4 with ALLOW_XP already false, so the XP write cannot be the cause. It
+-- stays off for exactly one run so the drop-into-water fix is tested as a single
+-- variable, then goes back on. Fishing.setXp(true) flips it live -- no redeploy,
+-- no reload, so both tests fit in one session.
 local ALLOW_XP = false
+
+-- Fishing.setXp(true|false) -- toggle XP granting at runtime.
+function Fishing.setXp(on)
+    ALLOW_XP = (on == true)
+    log("xp granting -> " .. tostring(ALLOW_XP))
+    return ALLOW_XP
+end
 
 function Fishing.grantXp(character)
     if not ALLOW_XP then return "xp disabled (suspected character corruption)" end
