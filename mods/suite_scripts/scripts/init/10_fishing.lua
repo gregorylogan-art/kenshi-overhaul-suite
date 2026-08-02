@@ -184,6 +184,21 @@ end
 -- 4 = food/materials. "Sandals" was NOT FOUND in any category, so the vanilla
 -- name differs -- alternates are tried below and the pool self-prunes to
 -- whatever actually exists.
+-- FORWARD DECLARATIONS. Lua locals are invisible above their declaration, and
+-- tryCatch (below) uses both of these while they are defined further down the
+-- file -- which made them nil and threw
+--   "bad argument #1 to 'ipairs' (table expected, got nil)"
+-- every cast, so no catch ever completed. Declared here, assigned later.
+local lookupItemData
+
+-- Preferred fish, best first; first that RESOLVES wins, so fishing adopts the
+-- FCS items automatically and falls back to vanilla Dried Fish otherwise.
+local FISH_PREFERENCE = {
+    "Small Fish",   -- FCS: 11-KenshiOverhaulSuite.mod
+    "Raw Fish",     -- FCS: 10-KenshiOverhaulSuite.mod
+    "Dried Fish",   -- vanilla fallback
+}
+
 local JUNK_CANDIDATES = {
     -- confirmed resolving
     "Iron Club",            -- category 2
@@ -255,11 +270,7 @@ end
 -- RESOLVES wins, so the moment the FCS items are authored fishing switches to
 -- them automatically -- and until then it keeps working on vanilla Dried Fish.
 -- No code change needed on either side of the FCS session.
-local FISH_PREFERENCE = {
-    "Small Fish",   -- FCS: 11-KenshiOverhaulSuite.mod
-    "Raw Fish",     -- FCS: 10-KenshiOverhaulSuite.mod
-    "Dried Fish",   -- vanilla fallback, confirmed working
-}
+-- (FISH_PREFERENCE is declared near the top -- Lua scoping, see the note there.)
 
 -- ---------------------------------------------------------------------------
 -- COOKING SINK -- implemented in LUA because FCS has no failure-chance field.
@@ -296,7 +307,8 @@ end
 
 local gameDataCache = {}
 
-local function lookupItemData(character, itemId)
+-- assigned to the forward-declared local above (not a new local)
+lookupItemData = function(character, itemId)
     local name = ITEM_NAMES[itemId] or itemId
     if gameDataCache[name] ~= nil then return gameDataCache[name] or nil end
 
