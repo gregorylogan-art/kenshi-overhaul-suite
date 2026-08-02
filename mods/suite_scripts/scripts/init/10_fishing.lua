@@ -726,6 +726,45 @@ end
 -- no reload, so both tests fit in one session.
 local ALLOW_XP = true
 
+-- Fishing.probeBar() -- can we show a real floating progress bar?
+--
+-- Greg wants the mining/ore-style bar on a cast: "i have no idea, i just press g
+-- endlessly." The API exists in the bindings:
+--     ForgottenGUI:createFloatingProgressBar() -> FloatingProgressBar
+--     FloatingProgressBar:setProgress(number) / :setCaption(string) / :update()
+-- What is NOT documented is how to obtain the ForgottenGUI instance -- no global
+-- returns one. So this PROBES rather than assuming, and reports what it finds.
+--
+-- Deliberately a manual command, not wired into the cast. The bindings docs have
+-- been wrong ~29 times, and calling an unverified engine surface 100x/sec inside
+-- the tick is exactly how the earlier hard crashes happened. Verify first, wire
+-- second.
+function Fishing.probeBar()
+    log("=== progress-bar probe ===")
+    local found = {}
+    for _, name in ipairs({ "getForgottenGUI", "getGUI", "getGui", "getScreen",
+                            "getMainGUI", "getInterface", "getPlayerInterface" }) do
+        local ok, v = pcall(function() return _G[name] end)
+        if ok and type(v) == "function" then
+            found[#found + 1] = name
+            local okc, res = pcall(v)
+            log(("  %-22s callable -> %s"):format(name, okc and type(res) or "ERROR"))
+        end
+    end
+    if #found == 0 then log("  no GUI accessor global found") end
+
+    -- Direct construction is the other candidate: the type has a _CONSTRUCTOR.
+    local okT, T = pcall(function() return _G["FloatingProgressBar"] end)
+    log("  FloatingProgressBar global: " .. (okT and type(T) or "ERROR"))
+    if okT and type(T) == "table" then
+        local keys = {}
+        for k in pairs(T) do keys[#keys + 1] = tostring(k) end
+        table.sort(keys)
+        log("    keys: " .. (table.concat(keys, ", "):sub(1, 200)))
+    end
+    log("=== end probe (nothing was drawn) ===")
+end
+
 -- Fishing.setAddAfterCreate(true) -- reverse the double-registration fix live,
 -- for the single case where items stop appearing in the inventory at all.
 function Fishing.setAddAfterCreate(on)
@@ -864,6 +903,17 @@ local function beginCast(character, name)
         return
     end
     s.casting, s.elapsed = true, 0
+    -- HOLD THE CASTER. The tick used to re-resolve the fisher through
+    -- getSelectedCharacter() every frame and skip any cast whose name did not
+    -- match the current selection -- which made squad fishing structurally
+    -- impossible: a second fisher's cast froze the instant you clicked someone
+    -- else. Each cast now carries its own character, so selection is a UI
+    -- concern only and N fishers run independently.
+    --
+    -- The reference is held for one cast (~5s) and re-validated every tick
+    -- before use, so a character that dies or unloads mid-cast drops the cast
+    -- instead of being dereferenced.
+    s.character = character
     -- Anchor the cast to a spot. Moving away cancels it (see the tick handler):
     -- fishing is a deliberate act you stand still for, not something done at a jog.
     s.anchor = readPos(character)
@@ -900,6 +950,34 @@ local function finishCast(character, name)
     log(("%s: CAUGHT %s%s | grant: %s (%s) | totals fish=%d junk=%d")
         :format(name, itemId, isGarbage and " (junk)" or "",
                 granted and "OK" or "FAILED", how, s.caught, s.garbage))
+end
+
+-- AUTO-FISH re-arm. Kenshi's idiom is "give the order once and walk away", not
+-- "press the key once per action" -- Greg's words were "i just press g
+-- endlessly". A character told to fish keeps fishing until something real stops
+-- them: pack full, walked away, water gone, or told to stop.
+--
+-- Placed after finishCast and called from the TICK rather than from inside
+-- finishCast, so it can see beginCast (declared above it) without a forward
+-- declaration -- the nil-upvalue trap that already cost this file one debugging
+-- session when FISH_PREFERENCE was used above its own declaration.
+local function rearmIfAuto(character, name)
+    local s = stateFor(name)
+    if not s.auto or s.casting then return end
+    -- Re-check the same two gates the key press checks, so auto stops for
+    -- exactly the reasons a manual cast would refuse -- no special cases.
+    local can, why = Fishing.canFish(character)
+    if not can then
+        s.auto = false
+        log(name .. ": auto-fish STOPPED -- " .. why)
+        return
+    end
+    if not Fishing.hasPackHeadroom(character) then
+        s.auto = false
+        log(name .. ": auto-fish STOPPED -- pack full")
+        return
+    end
+    beginCast(character, name)
 end
 
 -- ---------------------------------------------------------------------------
@@ -964,9 +1042,33 @@ if type(registerHandler) == "function" then
             log(("SURVEY %s | %s"):format(name, describe(Fishing.readWaterState(character))))
         end
 
+        -- G IS A TOGGLE, not a single cast. Greg: "i just press g endlessly."
+        -- Kenshi's idiom is to give an order once and let the character work
+        -- until something stops them, so G means "fish / stop fishing" and the
+        -- character repeats on their own.
+        --
+        -- Per-CHARACTER, so a squad is armed by selecting each in turn and
+        -- pressing G: they then fish in parallel, because the tick no longer
+        -- depends on who is selected.
+        local s = stateFor(name)
+        if s.auto then
+            s.auto = false
+            s.casting, s.elapsed, s.anchor = false, 0, nil
+            log(name .. ": auto-fish OFF")
+            return
+        end
+        s.auto = true
+        log(name .. ": auto-fish ON")
         beginCast(character, name)
+        -- beginCast refuses on dry land or a full pack and says why. Do not
+        -- leave auto armed after a refusal, or the character would silently
+        -- start fishing later when conditions happened to change.
+        if not s.casting then
+            s.auto = false
+            log(name .. ": auto-fish OFF (could not start)")
+        end
     end)
-    log("input hook armed -- press G while WADING (shallow water) with a character selected")
+    log("input hook armed -- select a character, WADE into shallow water, press G to start/stop fishing")
 
     -- Timer: onCharsUpdate is the sim tick. Frame delta is not exposed, so v0
     -- counts ticks. MEASURED from the live log: a "3s" cast completed in ~0.9s
@@ -981,34 +1083,33 @@ if type(registerHandler) == "function" then
             if s.casting then
                 s.elapsed = s.elapsed + 1
 
-                local ok, character = pcall(function() return getSelectedCharacter() end)
-                -- The tick must only act on the character who actually cast.
-                -- It previously used whoever was SELECTED, so clicking a
-                -- squadmate mid-cast put the fish in the wrong inventory, broke
-                -- the cast against a stranger's position, and printed the tally
-                -- under the caster's name. Skip entries that are not the
-                -- current selection rather than acting on them.
-                -- Resolve the selected character's name PROPERLY. This used to be
-                --     local okN, curName = ok and character and pcall(...)
-                -- but a Lua `and` expression truncates multiple returns to ONE
-                -- value, so curName was always nil, the caster check always
-                -- failed, every cast was skipped, and casts hung on
-                -- "already casting" forever -- never completing, never breaking.
-                local curName = nil
-                if ok and character then
-                    local okN, n = pcall(function() return character:getName() end)
-                    if okN then curName = n end
+                -- The caster is whoever STARTED this cast, not whoever happens
+                -- to be selected. Selection is a UI concern; casts are not.
+                --
+                -- This used to call getSelectedCharacter() and skip any cast
+                -- whose name did not match, which meant only one character could
+                -- ever fish -- clicking a squadmate silently froze everyone
+                -- else's cast until it hit the timeout valve.
+                --
+                -- Re-validate the held reference before touching it: a cheap
+                -- getName() proves the character is still live. If that fails,
+                -- drop the cast rather than dereference something unloaded.
+                local character = s.character
+                local ok = false
+                if character then
+                    local okN = pcall(function() return character:getName() end)
+                    ok = okN
                 end
 
                 -- SAFETY VALVE: a cast may never hang. If it somehow outlives
                 -- twice its own duration, drop it rather than wedge the state.
                 if s.elapsed > target * 2 then
                     s.casting, s.elapsed, s.anchor = false, 0, nil
+                    s.auto = false   -- a stuck cast must not silently re-arm
                     log(name .. ": cast timed out (stuck) -- reset")
-                elseif curName and curName ~= name then
-                    -- a different character is selected: leave this cast alone
                 elseif not ok or not character then
-                    s.casting, s.anchor = false, nil
+                    s.casting, s.anchor, s.character = false, nil, nil
+                    s.auto = false
                 else
                     -- STANDSTILL: drifting off the anchor cancels the cast.
                     if s.anchor then
@@ -1016,6 +1117,12 @@ if type(registerHandler) == "function" then
                         local d2 = now and distSq(now, s.anchor) or 0
                         if now and d2 > CFG.moveToleranceSq then
                             s.casting, s.elapsed, s.anchor = false, 0, nil
+                            -- Walking away CANCELS auto-fishing, the same way a
+                            -- Kenshi job drops when you order the character
+                            -- somewhere else. Greg fishes under attack ("dust
+                            -- bandits, bone dogs"), so fleeing must not leave an
+                            -- invisible loop armed that re-casts on arrival.
+                            s.auto = false
                             -- Report the ACTUAL drift so the tolerance is tuned
                             -- from measurement rather than my guess at Kenshi's
                             -- world-unit scale.
@@ -1028,9 +1135,15 @@ if type(registerHandler) == "function" then
                         local can, why = Fishing.canFish(character)
                         if not can then
                             s.casting, s.elapsed, s.anchor = false, 0, nil
+                            s.auto = false   -- waded out of fishable water
                             log(name .. ": cast broken -- " .. why)
                         elseif s.elapsed >= target then
                             finishCast(character, name)
+                            -- Re-arm HERE rather than inside finishCast, so the
+                            -- catch is fully resolved and logged before the next
+                            -- cast starts. rearmIfAuto is a no-op unless auto is
+                            -- on, so the manual path is unchanged.
+                            rearmIfAuto(character, name)
                         end
                     end
                 end
