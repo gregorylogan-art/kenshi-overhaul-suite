@@ -27,6 +27,14 @@
 local TAG = "[SKILL] "
 local function log(m) print(TAG .. tostring(m)) end
 
+-- HEARTBEAT: printed as the very first executable statement. The 2026-08-01
+-- session saw ScriptLoader report this file as "loaded" while it produced ZERO
+-- output and logged no error -- so we could not tell whether the body ran at
+-- all. If this line is absent from the log, the chunk never executed (load or
+-- compile failure); if it is present but later lines are missing, execution
+-- died in between and the last line printed marks the spot.
+log("=== 19_fishing_skill.lua BEGIN ===")
+
 Fishing = Fishing or {}
 
 -- Stat IDs MEASURED live via 18_stat_probe.lua (38 named stats enumerated).
@@ -193,4 +201,9 @@ function Fishing.testXp(times)
 end
 
 log("skill model loaded. Try:  Fishing.simulate()")
-Fishing.simulate()
+-- Auto-run wrapped: if the curve print throws, the failure is reported instead
+-- of silently killing the tail of the file.
+local okSim, simErr = pcall(Fishing.simulate)
+if not okSim then log("simulate() FAILED: " .. tostring(simErr)) end
+log("=== 19_fishing_skill.lua END (grantXp is " ..
+    (type(Fishing.grantXp) == "function" and "READY" or "MISSING") .. ") ===")
