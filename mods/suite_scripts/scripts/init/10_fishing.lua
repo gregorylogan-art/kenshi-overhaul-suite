@@ -44,6 +44,8 @@ local CFG = {
     -- console-only, which is not a feature -- a player should never need the
     -- script console to finish a gathering loop.
     collectKey  = 35,    -- H
+    bagKey      = 36,    -- J -- show the catch bag on screen
+    bagShowSecs = 8,     -- how long the readout lingers
     castSeconds = 5.0,   -- Greg v1.1: 3s felt too quick for a deliberate act
 
     -- OUTCOME TABLE (Greg v1.1). Junk dominates deliberately: fishing must not
@@ -1233,6 +1235,41 @@ function Fishing.bag()
     return s.bagCount
 end
 
+-- Fishing.showBag() -- put the catch bag ON SCREEN (J).
+--
+-- NOT a real menu, and it cannot be one. Every GUI construction call in
+-- KenshiLua returns opaque `lightuserdata` and there is no Widget binding, so a
+-- panel we create can never be populated -- and nothing exposes Kenshi's own
+-- container UI. `createScreenLabelD(text, time)` is the one text surface
+-- available: fire-and-forget, self-expiring, no handle to update. A clickable
+-- transfer window needs C++ (see #42).
+function Fishing.showBag()
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then return end
+    local okN, name = pcall(function() return c:getName() end)
+    name = (okN and name) or "?"
+    local s = stateFor(name)
+
+    local lines
+    if not s.bag or (s.bagCount or 0) == 0 then
+        lines = name .. " -- catch bag empty"
+    else
+        local parts = { ("%s -- CATCH BAG (%d)"):format(name, s.bagCount) }
+        for id, n in pairs(s.bag) do
+            parts[#parts + 1] = ("  %s x%d"):format(tostring(ITEM_NAMES[id] or id), n)
+        end
+        parts[#parts + 1] = "  [H] collect into inventory"
+        lines = table.concat(parts, "\n")
+    end
+
+    local okG, gui = pcall(function() return getForgottenGUI() end)
+    if not okG or not gui then log(lines) return end
+    local okL = pcall(function() gui:createScreenLabelD(lines, CFG.bagShowSecs) end)
+    -- Always log too: if the label does not render, the information is not lost.
+    log(lines)
+    if not okL then log("(screen label unavailable -- log only)") end
+end
+
 -- Fishing.collect() -- move the catch bag into the character's inventory.
 --
 -- The ONLY place fishing writes to an inventory, and only when the player asks.
@@ -1642,6 +1679,12 @@ if type(registerHandler) == "function" then
         -- because the player asked for it.
         if kc == CFG.collectKey then
             Fishing.collect()
+            return
+        end
+
+        -- J: show the catch bag on screen.
+        if kc == CFG.bagKey then
+            Fishing.showBag()
             return
         end
 

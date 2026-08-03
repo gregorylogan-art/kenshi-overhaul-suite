@@ -192,7 +192,55 @@ Ownerships, RootObject, ShopTrader, UseableStuff. `addMoney`/`setMoney` are on
 
 ---
 
-## 7. OPEN: the character-freeze bug (#21 / #37)
+## 6b. GUI: what is and is not possible from Lua
+
+**You cannot build a menu.** Every GUI construction call returns
+**`lightuserdata`** — an opaque pointer — and there is **no `Widget` binding**,
+so a created panel can never be populated:
+
+| Call | Returns | Usable? |
+|---|---|---|
+| `createPanel` / `createPanelAbs` / `createTabPanel` | `lightuserdata` | ❌ cannot add children |
+| `createFloatingImage` / `createFloatingImageAbs` | `lightuserdata` | ❌ |
+| `createScreenLabelD(text, time)` | `lightuserdata` | ✅ fire-and-forget text |
+| `createFloatingProgressBar()` | **`FloatingProgressBar`** | ✅ the only widget with methods |
+
+There is also **no way to open Kenshi's native container/inventory UI** from Lua
+(only `showTutorialWindow` exists).
+
+**Consequence:** player-facing readouts must be built from
+`FloatingProgressBar` (caption + progress, world-positioned) and
+`createScreenLabelD` (text with a lifetime). Anything richer needs C++.
+
+---
+
+## 7. The character-freeze bug (#21 / #37) — CAUSE IDENTIFIED
+
+> **The fishing loop must never write to a character's inventory.**
+>
+> Greg called it: *"its 85% sure its the reason harvesting is a second inventory
+> in kenshi. im sure its one of his law in his engine."*
+>
+> **Confirmed 2026-08-02:** with catches banked in Lua state and **zero**
+> inventory calls in the loop (no grant, and no `hasRoomForItem` gates either),
+> a run of **dozens of items** completed with no freeze. Every previous approach
+> froze within ~11–20 grants.
+>
+> **Why every earlier fix failed.** They all reduced the *frequency* of
+> inventory interaction without reaching zero — so each one lengthened the fuse
+> and looked like progress. Caps were worst of all: a cap is a guess about the
+> player's inventory (what they picked up, whether they wear a backpack, what
+> else fills the grid) wearing a guard's uniform.
+>
+> **The pattern is Kenshi's own.** Every hand-gathering profession writes to a
+> separate container and the player transfers manually. Nothing in vanilla
+> streams items into a working character's pack.
+>
+> **Binding rule for every future system** (cooking, trade, loot, quest rewards):
+> accumulate outside the inventory; write only on an explicit, bounded,
+> player-initiated action.
+
+### Original investigation (kept — the record of what was eliminated)
 
 > **STILL OPEN. A previous version of this section said "likely resolved" — it
 > was wrong, and it was written on one hopeful report before a full load had been
