@@ -42,6 +42,9 @@ Game: `D:\SteamLibrary\steamapps\common\Kenshi` — Steam, **v1.0.68**. RE_Kensh
 8. **Save policy (until 1.0): new game required; saves may break freely.** FCS bakes IDs into saves. Revisit at 1.0.
 9. **`kos.*` naming** for cvars/config (Kenshi Overhaul Suite), never `sf.*`.
 10. **GitHub issues are the north star**; milestone per phase.
+11. **A gameplay loop NEVER writes to a character's inventory.** Accumulate outside (`Items.bank`), transfer only on an explicit player action (`Items.collect`). This is an *engine law*, not a style preference — violating it froze characters for a full day of debugging (#37), and every gathering profession in vanilla Kenshi obeys it. `Items.verify()` INV5 catches breaches automatically.
+12. **Run the headless harness before asking Greg to play.** `python tools/luarun.py --tests` drives Kenshi's own `lua51.dll` with no game open. Four of this project's worst bugs needed no game to catch and cost live sessions anyway. `deploy.sh` gates on lint **and** tests.
+13. **Name the verification tier, always.** Lint proves syntax. Headless proves logic. **Only a live session proves engine behaviour.** One "likely resolved" has already been retracted for blurring these — say "headless green, live-PIE pending" when that is what happened.
 
 ## Ported from StarFall — patterns, never code
 
