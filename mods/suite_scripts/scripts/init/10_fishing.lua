@@ -40,6 +40,10 @@ local CFG = {
     -- vanilla Kenshi, so it double-fires. 34 = G, which vanilla appears to
     -- leave free. Change here if it collides; the keycode logger finds codes.
     fishKey     = 34,    -- G
+    -- H. Scancodes here are sequential (F=33, G=34), so H=35. Collecting was
+    -- console-only, which is not a feature -- a player should never need the
+    -- script console to finish a gathering loop.
+    collectKey  = 35,    -- H
     castSeconds = 5.0,   -- Greg v1.1: 3s felt too quick for a deliberate act
 
     -- OUTCOME TABLE (Greg v1.1). Junk dominates deliberately: fishing must not
@@ -1474,8 +1478,13 @@ local function beginCast(character, name)
     s.character = character
     -- One caption per cast, held for the whole cast rather than re-rolled on
     -- every bar update -- a caption that flickered 10x/sec would be unreadable.
+    -- Caption carries the banked count, because with catches going to a Lua bag
+    -- there is otherwise NOTHING on screen telling the player they are
+    -- accumulating anything -- the inventory stays empty until they collect.
     s.caption = pickCaption()
-    barUpdate(s, character, 0, s.caption)
+    local held = s.bagCount or 0
+    barUpdate(s, character, 0,
+        held > 0 and (s.caption .. "   [" .. held .. " to collect - H]") or s.caption)
     -- Anchor the cast to a spot. Moving away cancels it (see the tick handler):
     -- fishing is a deliberate act you stand still for, not something done at a jog.
     s.anchor = readPos(character)
@@ -1627,7 +1636,25 @@ if type(registerHandler) == "function" then
         -- Type-tolerant compare: accept number, numeric string, or anything
         -- whose tostring() is the scancode.
         local kc = tonumber(keyCode) or tonumber(tostring(keyCode))
-        if kc ~= CFG.fishKey then return end
+
+        -- H: collect the catch bag into the selected character's inventory.
+        -- This is the ONLY inventory write fishing performs, and it happens
+        -- because the player asked for it.
+        if kc == CFG.collectKey then
+            Fishing.collect()
+            return
+        end
+
+        if kc ~= CFG.fishKey then
+            -- Confirm the collect scancode if H turns out not to be 35. Logged
+            -- once per key so normal play does not spam the log.
+            Fishing._seenKeys = Fishing._seenKeys or {}
+            if kc and not Fishing._seenKeys[kc] then
+                Fishing._seenKeys[kc] = true
+                log("key " .. tostring(kc) .. " (G=" .. CFG.fishKey .. ", collect=" .. CFG.collectKey .. ")")
+            end
+            return
+        end
         log("FISH KEY MATCHED (" .. tostring(kc) .. ")")
 
         local ok, character = pcall(function() return getSelectedCharacter() end)
