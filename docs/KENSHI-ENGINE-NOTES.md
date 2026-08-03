@@ -11,6 +11,38 @@
 
 ---
 
+## 0. You can run this code WITHOUT Kenshi
+
+Kenshi ships **`mods/KenshiLua/lua51.dll`** but no `lua.exe`. `tools/luarun.py`
+drives that DLL through ctypes — the **same Lua 5.1 runtime the game uses**,
+rather than a different Lua that might disagree about semantics.
+
+```bash
+python tools/luarun.py --selftest    # module selftests
+python tools/luarun.py --tests       # tests/*.lua regression suite
+python tools/luarun.py --eval "print(_VERSION)"
+```
+
+Every suite module loads headlessly. `10_fishing.lua` degrades cleanly to
+`registerHandler unavailable -- fishing inert` instead of erroring, so its pure
+logic is testable too.
+
+**Why this matters:** these bugs each cost a live session and *none* needed the
+game to catch —
+
+- a local used above its own declaration → `nil` → threw on every cast
+- a Lua `and` truncating multiple returns → every cast hung on "already casting"
+- a junk band falling through to fish → shipped 5/80/15 was really 5/95
+- an odds model never called from the live path
+
+`deploy.sh` runs **lint → tests → copy** and refuses on either.
+
+**Verification tiers:** lint proves syntax. Headless tests prove logic. **Only a
+live session proves engine behaviour** — the freeze, the GUI, item minting.
+Never report a headless pass as though the game confirmed it.
+
+---
+
 ## 1. Hard rules (learned by crashing)
 
 | Rule | Why |
