@@ -73,6 +73,24 @@ local CFG = {
     garbageOdds = 0.40,
     logKeycodes = false,
 
+    -- STOP WELL BEFORE THE PACK IS FULL.
+    --
+    -- Greg, after four recurrences: "i 100% dont think its exp i think 100% its
+    -- inventory." The evidence agrees -- every symptom is inventory-shaped (the
+    -- inventory will not open, the stats screen that renders encumbrance dies,
+    -- the character stops responding), and it fires only at saturation.
+    --
+    -- If the inventory is the trigger, then OUR OWN hasRoomForItem probes on a
+    -- saturated grid are the thing poking it: we call it before every cast and
+    -- again before every grant. The 19:55 freeze happened on the exact cast that
+    -- first hit no-room, so even one probe against a full pack may be enough.
+    --
+    -- So do not walk up to the boundary at all. Count items instead -- a cheap
+    -- read that does not inspect the packing grid -- and stop after this many
+    -- catches on one load. The player empties, presses G, and the baseline
+    -- re-takes.
+    maxCatchesPerLoad = 10,
+
     -- Floating "what is this character doing" bar over the fisher's head.
     -- Greg: "without lua up its hard to know if im fishing or not."
     -- Kill switch: Fishing.setBar(false) if it ever misbehaves in the tick.
@@ -492,6 +510,31 @@ end
 --
 -- Book is category 4 (general goods), multi-cell, and can only live in the grid.
 local HEADROOM_PROBE = "Book"
+
+-- Item count, read WITHOUT inspecting the packing grid. Returns nil if the call
+-- is unavailable, so callers can tell "empty" from "unknown".
+function Fishing.itemCount(character)
+    if not character then return nil end
+    local okInv, inv = pcall(function() return character:getInventory() end)
+    if not okInv or not inv or not inv.getNumItems then return nil end
+    local ok, n = pcall(function() return inv:getNumItems() end)
+    if ok and type(n) == "number" then return n end
+    return nil
+end
+
+-- True while this character may keep fishing on the current load.
+-- Deliberately count-based rather than hasRoomForItem-based: the whole point is
+-- to stop BEFORE the grid saturates, so the probe that may itself be the trigger
+-- is never run against a full pack.
+function Fishing.underCatchCap(s, character)
+    local n = Fishing.itemCount(character)
+    if not n then return true end          -- unknown -> do not block; the grant
+                                           -- path still refuses without room
+    if not s.baseItems then s.baseItems = n end
+    -- The player emptied the pack: re-baseline downward so fishing resumes.
+    if n < s.baseItems then s.baseItems = n end
+    return (n - s.baseItems) < CFG.maxCatchesPerLoad
+end
 
 function Fishing.hasPackHeadroom(character)
     if not character then return true end
@@ -1238,6 +1281,14 @@ local function beginCast(character, name)
     -- Pack fullness is checked BEFORE the 5-second cast, not after it, so the
     -- refusal is immediate feedback rather than a wasted wait ending in nothing.
     -- canFish stays purely about water state; this is a separate gate.
+    -- COUNT CAP FIRST. This is the gate that must fire, because it is the one
+    -- that keeps us away from a saturated grid entirely. hasRoomForItem stays
+    -- below it as a backstop, but by then we are already at the boundary that
+    -- is under suspicion for the freeze.
+    if not Fishing.underCatchCap(s, character) then
+        log(name .. ": PACK FULL (catch cap) -- empty the pack, then press G again")
+        return
+    end
     if not Fishing.hasPackHeadroom(character) then
         log(name .. ": PACK FULL -- make space before fishing (issue #21 guard)")
         return
@@ -1331,6 +1382,11 @@ local function rearmIfAuto(character, name)
         log(name .. ": auto-fish STOPPED -- " .. why)
         return
     end
+    if not Fishing.underCatchCap(s, character) then
+        s.auto = false
+        log(name .. ": auto-fish STOPPED -- catch cap reached (pack not saturated)")
+        return
+    end
     if not Fishing.hasPackHeadroom(character) then
         s.auto = false
         log(name .. ": auto-fish STOPPED -- pack full")
@@ -1418,7 +1474,12 @@ if type(registerHandler) == "function" then
             return
         end
         s.auto = true
-        log(name .. ": auto-fish ON")
+        -- RE-BASELINE the catch cap on every manual start. Pressing G is the
+        -- player saying "go again", which is exactly when they have just made
+        -- room. Without this, one full pack would disable fishing permanently.
+        s.baseItems = Fishing.itemCount(character)
+        log(("%s: auto-fish ON  (pack has %s items; stopping after %d catches)")
+            :format(name, tostring(s.baseItems), CFG.maxCatchesPerLoad))
         beginCast(character, name)
         -- beginCast refuses on dry land or a full pack and says why. Do not
         -- leave auto armed after a refusal, or the character would silently
