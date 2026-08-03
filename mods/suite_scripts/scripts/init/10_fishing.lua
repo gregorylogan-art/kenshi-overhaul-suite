@@ -1115,7 +1115,9 @@ end
 -- 5-second bar does not need 500 updates -- 50 is already smoother than the eye
 -- resolves, and this code sits in the hot path for every fisher at once.
 local BAR_UPDATE_EVERY = 10
-local BAR_PARK_Y = -10000   -- no setVisible on this type; park it far below
+-- Far off on EVERY axis. The old park spot was {0, -10000, 0}, which is the map
+-- origin once the Y is ignored -- i.e. dead centre of the world.
+local BAR_PARK_FAR = 9000000
 
 local function barFor(s)
     if s.bar ~= nil then return s.bar or nil end
@@ -1192,9 +1194,20 @@ end
 local function barHide(s)
     local bar = s.bar
     if not bar then return end
+    -- PARKING AT x=0,z=0 PUT THE BAR AT MAP CENTRE.
+    -- It was parked at {0, -10000, 0} on the assumption that a huge negative Y
+    -- would bury it. Greg found a bar stranded in the middle of the map long
+    -- after walking away, so the Y is clamped or ignored and only X/Z were
+    -- honoured -- leaving it at the world origin, which is the single worst
+    -- place to put something meant to be invisible.
+    --
+    -- There is no setVisible on this type, so hiding has to be done by making it
+    -- both empty AND remote: blank the caption, zero the fill, and move it far
+    -- off on every axis rather than to an origin-adjacent point.
+    pcall(function() bar:setCaption("") end)
     pcall(function() bar.progress = 0 end)
     pcall(function() bar:setProgress(0) end)
-    pcall(function() bar:setPosition({ x = 0, y = BAR_PARK_Y, z = 0 }) end)
+    pcall(function() bar:setPosition({ x = BAR_PARK_FAR, y = BAR_PARK_FAR, z = BAR_PARK_FAR }) end)
     pcall(function() bar:update() end)
 end
 
@@ -1728,10 +1741,36 @@ if type(registerHandler) == "function" then
         if s.auto then
             s.auto = false
             s.casting, s.elapsed, s.anchor = false, 0, nil
-                    barHide(s)
-            log(name .. ": auto-fish OFF")
+            barHide(s)
+            -- G ALSO COLLECTS. Greg: "i dont want it to be a seperate button
+            -- that is to much for the player. what about on g both happen."
+            --
+            -- Stopping is the right moment: the player has finished, and it is
+            -- still ONE bounded, player-initiated write rather than a write
+            -- every five seconds -- which is the rule that fixed the freeze.
+            -- H remains as an explicit collect for mid-run top-ups.
+            local n = s.bagCount or 0
+            if n > 0 then
+                log(("%s: auto-fish OFF -- collecting %d"):format(name, n))
+                Fishing.collect()
+            else
+                log(name .. ": auto-fish OFF")
+            end
             return
         end
+        -- ...and G collects on the way IN as well, not only on the way out.
+        -- Auto can stop for reasons the player did not choose (walked off the
+        -- anchor, waded too deep, attacked), which would otherwise strand the
+        -- bag until they pressed G twice. Collecting here means one G always
+        -- banks what is owed before starting again.
+        --
+        -- Safe against mashing: once the bag is empty this is a no-op, so
+        -- repeated presses cannot repeat the write.
+        if (s.bagCount or 0) > 0 then
+            log(("%s: collecting %d before casting"):format(name, s.bagCount))
+            Fishing.collect()
+        end
+
         s.auto = true
         -- RE-BASELINE the catch cap on every manual start. Pressing G is the
         -- player saying "go again", which is exactly when they have just made
