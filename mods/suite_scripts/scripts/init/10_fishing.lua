@@ -965,7 +965,8 @@ function Fishing.testBar(pct)
     if not okC then log("  setCaption error: " .. tostring(e1)) end
 
     log(("testBar: setProgress(%d)  [range 0..%d]"):format(pct, BAR_RANGE))
-    local okP, e2 = pcall(function() bar:setProgress(pct) end)
+    local okP, e2 = pcall(function() bar:setProgress(pct / BAR_RANGE) end)
+    pcall(function() bar.progress = math.floor(pct) end)
     if not okP then log("  setProgress error: " .. tostring(e2)) end
 
     log("testBar: update()")
@@ -1086,9 +1087,20 @@ local function barUpdate(s, character, frac, caption)
     --
     -- So drive both, then repaint. All pcall-wrapped: whichever is not the real
     -- channel simply does nothing, and the widget cannot be left half-updated.
-    local v = math.floor(frac * BAR_RANGE)
-    pcall(function() bar.progress = v end)
-    pcall(function() bar:setProgress(v) end)
+    -- THE TWO CHANNELS TAKE DIFFERENT SCALES. Observed live: the bar jumped to
+    -- 100% immediately after a cast began and read blank when it ended.
+    --
+    -- Blank at the end is barHide writing 0, so 0 lands correctly. Full at the
+    -- start is the first tick update: at ~2% progress we were sending
+    -- floor(0.02 * 1000) = 20 into setProgress(). If that method wants a 0..1
+    -- FRACTION, then anything above 1 clamps to full -- which is exactly the
+    -- "refreshes rather than loads" behaviour, a bar snapping between 0 and 100.
+    --
+    -- The FIELD is 0..1000 (integer, mirroring the widget's RangePosition of
+    -- Range=1000 in Kenshi_ProgressBarPanel.layout). The METHOD normalises.
+    -- Feed each the scale it wants instead of one value to both.
+    pcall(function() bar.progress = math.floor(frac * BAR_RANGE) end)  -- 0..1000
+    pcall(function() bar:setProgress(frac) end)                        -- 0..1
     pcall(function() bar.needUpdate = true end)   -- ScreenLabelInterface repaint flag
     pcall(function() bar:update() end)
 
@@ -1106,6 +1118,7 @@ end
 local function barHide(s)
     local bar = s.bar
     if not bar then return end
+    pcall(function() bar.progress = 0 end)
     pcall(function() bar:setProgress(0) end)
     pcall(function() bar:setPosition({ x = 0, y = BAR_PARK_Y, z = 0 }) end)
     pcall(function() bar:update() end)
