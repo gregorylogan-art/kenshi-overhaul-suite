@@ -798,7 +798,7 @@ end
 -- How far above the fisher's position the bar floats. Tunable from one place
 -- because the correct value -- and even which axis is "up" in Kenshi -- is not
 -- yet confirmed. Fishing.setBarHeight(n) adjusts it live.
-BAR_HEIGHT = 2.0
+BAR_HEIGHT = 12.0
 
 -- ---------------------------------------------------------------------------
 -- Fishing.unstick() -- try to recover a character whose GUI has locked up
@@ -1034,8 +1034,30 @@ local function barUpdate(s, character, frac, caption)
         end)
     end
     if caption then pcall(function() bar:setCaption(caption) end) end
-    pcall(function() bar:setProgress(math.floor(frac * BAR_RANGE)) end)
+
+    -- THE FILL DID NOT MOVE with setProgress() alone, though the bar itself
+    -- appeared and the caption worked. FloatingProgressBar exposes `progress`
+    -- as an RW FIELD as well as a setProgress() method, and the two are not
+    -- necessarily the same path to the underlying MyGUI RangePosition -- one may
+    -- set a member the repaint never reads.
+    --
+    -- So drive both, then repaint. All pcall-wrapped: whichever is not the real
+    -- channel simply does nothing, and the widget cannot be left half-updated.
+    local v = math.floor(frac * BAR_RANGE)
+    pcall(function() bar.progress = v end)
+    pcall(function() bar:setProgress(v) end)
+    pcall(function() bar.needUpdate = true end)   -- ScreenLabelInterface repaint flag
     pcall(function() bar:update() end)
+
+    -- One readback, mid-cast, to see whether the value is landing at all. If it
+    -- reads back what we wrote and the bar still looks empty, the problem is the
+    -- repaint rather than the value -- a different fix entirely.
+    if not Fishing._barProgLogged and frac > 0.3 then
+        Fishing._barProgLogged = true
+        local okR, got = pcall(function() return bar.progress end)
+        log(("bar progress: wrote %d (range %d) -> reads back %s")
+            :format(v, BAR_RANGE, okR and tostring(got) or "ERROR"))
+    end
 end
 
 local function barHide(s)
