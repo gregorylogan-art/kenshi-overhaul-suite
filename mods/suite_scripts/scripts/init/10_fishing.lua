@@ -73,6 +73,33 @@ local CFG = {
     garbageOdds = 0.40,
     logKeycodes = false,
 
+    -- ####################################################################
+    -- BANK CATCHES INSTEAD OF WRITING THEM INTO THE CHARACTER'S INVENTORY.
+    --
+    -- Greg, after the caps kept failing:
+    --   "cap is the wrong call. what if i pick up 9 items... what if i have a
+    --    backpack what if what if... its 85% sure its the reason harvesting is
+    --    a second inventory in kenshi. im sure its one of his law in his engine."
+    --
+    -- He is right on both counts, and the last log settles it: only ELEVEN grant
+    -- attempts and TWO fullness refusals that session, and it froze anyway. So
+    -- it is not probe frequency, and no cap can help -- a cap cannot know what
+    -- the player picked up, whether they wear a backpack, or what else fills the
+    -- grid. Every cap I wrote was a guess about someone else's inventory.
+    --
+    -- The pattern worth copying is Kenshi's own: EVERY hand-gathering profession
+    -- writes to a separate container and the player transfers manually. Nothing
+    -- in vanilla streams items into a working character's pack, which is exactly
+    -- what we were doing on a five-second loop.
+    --
+    -- So the loop makes ZERO inventory writes. Catches accumulate in Lua state
+    -- and move across only when the player asks (Fishing.collect), as ONE
+    -- deliberate bounded action instead of an automatic one every five seconds.
+    -- If that stops the freeze, the engine law is real and every future system
+    -- -- cooking, trade, loot -- must follow the same shape.
+    -- ####################################################################
+    bankCatches = true,
+
     -- STOP WELL BEFORE THE PACK IS FULL.
     --
     -- Greg, after four recurrences: "i 100% dont think its exp i think 100% its
@@ -870,7 +897,8 @@ local CAPTIONS = {
     "Contemplating the river",
     "Still nothing",
     "The water is not cooperating",
-    "I've caught mudcrabs more fearsome than you...",   -- Greg
+    "I've caught mudcrabs more fierce.",   -- Greg (shortened: the long form
+                                          -- outlived its phase on the bar)
     "Ah! A gift from the sea.",                         -- Greg
 }
 
@@ -1171,6 +1199,75 @@ function Fishing.setBar(on)
     return CFG.showBar
 end
 
+-- ---------------------------------------------------------------------------
+-- THE CATCH BAG
+-- ---------------------------------------------------------------------------
+-- Kenshi's own gathering professions never stream product into a working
+-- character's pack -- it lands in a separate container and the player collects
+-- it. Greg's read is that this is an engine law rather than a UI choice, and the
+-- evidence supports him: the freeze survived every cap, and the last occurrence
+-- needed only eleven grants.
+--
+-- The bag is plain Lua state. Fishing performs no engine writes; collecting is
+-- one deliberate, bounded, player-initiated action.
+
+-- Fishing.bag() -- show what the selected character has caught but not collected.
+function Fishing.bag()
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then log("bag: select a character first") return end
+    local okN, name = pcall(function() return c:getName() end)
+    name = (okN and name) or "?"
+    local s = stateFor(name)
+    if not s.bag or (s.bagCount or 0) == 0 then
+        log(name .. ": catch bag is empty")
+        return 0
+    end
+    log(("%s: catch bag (%d)"):format(name, s.bagCount))
+    for id, n in pairs(s.bag) do
+        log(("    %-22s x%d"):format(tostring(ITEM_NAMES[id] or id), n))
+    end
+    return s.bagCount
+end
+
+-- Fishing.collect() -- move the catch bag into the character's inventory.
+--
+-- The ONLY place fishing writes to an inventory, and only when the player asks.
+-- Stops at the first refusal and keeps the remainder banked, so a full pack
+-- costs one refused grant instead of one every five seconds forever.
+function Fishing.collect()
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then log("collect: select a character first") return end
+    local okN, name = pcall(function() return c:getName() end)
+    name = (okN and name) or "?"
+    local s = stateFor(name)
+
+    if not s.bag or (s.bagCount or 0) == 0 then
+        log(name .. ": nothing to collect")
+        return 0
+    end
+
+    local moved, stoppedOn = 0, nil
+    for id, n in pairs(s.bag) do
+        for _ = 1, n do
+            local granted, how = tryGrantItem(c, id)
+            if not granted then stoppedOn = how break end
+            s.bag[id] = s.bag[id] - 1
+            s.bagCount = s.bagCount - 1
+            moved = moved + 1
+        end
+        if s.bag[id] == 0 then s.bag[id] = nil end
+        if stoppedOn then break end
+    end
+
+    if stoppedOn then
+        log(("%s: collected %d, %d still banked -- %s")
+            :format(name, moved, s.bagCount, tostring(stoppedOn)))
+    else
+        log(("%s: collected %d item(s); catch bag empty"):format(name, moved))
+    end
+    return moved
+end
+
 -- Fishing.setBarHeight(3) -- raise or lower the bar, live, while looking at it.
 -- Beats redeploying to guess a world-unit offset.
 function Fishing.setBarHeight(n)
@@ -1338,6 +1435,11 @@ local function beginCast(character, name)
     -- that keeps us away from a saturated grid entirely. hasRoomForItem stays
     -- below it as a backstop, but by then we are already at the boundary that
     -- is under suspicion for the freeze.
+    -- WHILE BANKING, SKIP EVERY INVENTORY GATE. The catch goes into a Lua table,
+    -- so there is nothing to have room for -- and the entire point is that the
+    -- loop performs no inventory calls whatsoever. Fullness is the collect
+    -- step's problem, once, when the player asks for it.
+    if not CFG.bankCatches then
     -- CHEAP GATE FIRST, and it must not touch the grid. A player mashing G at a
     -- full pack previously fired one hasRoomForItem per press.
     if Fishing.packKnownFull(s, character) then
@@ -1357,6 +1459,7 @@ local function beginCast(character, name)
         log(name .. ": PACK FULL -- make space before fishing (issue #21 guard)")
         return
     end
+    end   -- if not CFG.bankCatches
     s.casting, s.elapsed = true, 0
     -- HOLD THE CASTER. The tick used to re-resolve the fisher through
     -- getSelectedCharacter() every frame and skip any cast whose name did not
@@ -1408,6 +1511,19 @@ local function finishCast(character, name)
         elseif not okXp then log(name .. ": xp ERROR " .. tostring(xp)) end
     end
 
+    -- BANKED PATH: no engine call at all. The catch is a number in a Lua table
+    -- until the player collects it. This is the whole point -- the fishing loop
+    -- must not touch the character's inventory.
+    if CFG.bankCatches then
+        s.bag = s.bag or {}
+        s.bag[itemId] = (s.bag[itemId] or 0) + 1
+        s.bagCount = (s.bagCount or 0) + 1
+        log(("%s: CAUGHT %s%s | banked (%d in catch bag) | totals fish=%d junk=%d")
+            :format(name, itemId, isGarbage and " (junk)" or "",
+                    s.bagCount, s.caught, s.garbage))
+        return
+    end
+
     local granted, how = tryGrantItem(character, itemId)
     log(("%s: CAUGHT %s%s | grant: %s (%s) | totals fish=%d junk=%d")
         :format(name, itemId, isGarbage and " (junk)" or "",
@@ -1447,6 +1563,7 @@ local function rearmIfAuto(character, name)
         log(name .. ": auto-fish STOPPED -- " .. why)
         return
     end
+    if not CFG.bankCatches then
     if Fishing.packKnownFull(s, character) then
         s.auto = false
         log(name .. ": auto-fish STOPPED -- pack full")
@@ -1463,6 +1580,7 @@ local function rearmIfAuto(character, name)
         log(name .. ": auto-fish STOPPED -- pack full")
         return
     end
+    end   -- if not CFG.bankCatches
     beginCast(character, name)
 end
 
@@ -1548,7 +1666,7 @@ if type(registerHandler) == "function" then
         -- RE-BASELINE the catch cap on every manual start. Pressing G is the
         -- player saying "go again", which is exactly when they have just made
         -- room. Without this, one full pack would disable fishing permanently.
-        s.baseItems = Fishing.itemCount(character)
+        s.baseItems = (not CFG.bankCatches) and Fishing.itemCount(character) or nil
         log(("%s: auto-fish ON  (pack has %s items; stopping after %d catches)")
             :format(name, tostring(s.baseItems), CFG.maxCatchesPerLoad))
         beginCast(character, name)
