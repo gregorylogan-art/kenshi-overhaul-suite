@@ -63,6 +63,29 @@ elif [[ -z "$PY" ]]; then
   [[ "$FORCE" == "--force" ]] || exit 3
 fi
 
+# ---- headless regression tests -------------------------------------------
+# Lint proves syntax; these prove BEHAVIOUR, and every case in them is a bug
+# this project actually shipped. They need no Kenshi and no game running, so
+# there is no excuse for a deploy that skips them.
+if [[ -f "$REPO/tools/luarun.py" && -n "$PY" ]]; then
+  echo "--- regression tests ---"
+  if ! "$PY" "$REPO/tools/luarun.py" --tests \
+        --modules "05_wsm.lua,10_fishing.lua,15_items.lua,24_cooking.lua" 2>&1 \
+        | grep -E "REGRESSIONS|FAILED|ERROR"; then
+    echo "  (no test output)"
+  fi
+  if ! "$PY" "$REPO/tools/luarun.py" --tests \
+        --modules "05_wsm.lua,10_fishing.lua,15_items.lua,24_cooking.lua" >/dev/null 2>&1; then
+    if [[ "$FORCE" != "--force" ]]; then
+      echo "REFUSING TO DEPLOY -- regression tests failed." >&2
+      exit 4
+    fi
+    echo "(--force: deploying despite test failures)"
+  fi
+  echo
+fi
+
+
 if [[ -f "$REPO/tools/lua_check.py" && -n "$PY" ]]; then
   echo "--- lua_check ---"
   if ! "$PY" "$REPO/tools/lua_check.py"; then
