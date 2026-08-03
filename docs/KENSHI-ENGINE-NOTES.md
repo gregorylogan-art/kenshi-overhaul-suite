@@ -192,23 +192,28 @@ Ownerships, RootObject, ShopTrader, UseableStuff. `addMoney`/`setMoney` are on
 
 ---
 
-## 7. The character-freeze bug (#21 / #37) — LIKELY RESOLVED
+## 7. OPEN: the character-freeze bug (#21 / #37)
 
-> **Resolution (2026-08-02).** Greg's call — *"i 100% dont think its exp i think
-> 100% its inventory"* — was correct. Switching the stop condition from
-> `hasRoomForItem` (a **grid probe**) to `getNumItems()` (a **plain count**), and
-> halting 10 catches into a load, stopped the freeze.
+> **STILL OPEN. A previous version of this section said "likely resolved" — it
+> was wrong, and it was written on one hopeful report before a full load had been
+> fished.** Do not trust a fix here until several full loads have been run.
 >
-> **The trigger was our own interaction with a saturated inventory**, not any
-> item we created. The previous guard stopped auto-fishing *at* the boundary but
-> still probed it, and the last recurrence landed on the exact cast that first
-> hit `hasRoomForItem=false`.
+> **Measured facts (2026-08-02):**
+> - A standard pack **saturates at ~15 items**.
+> - The catch cap of 10 never fired: the character started with 9 items, so the
+>   pack saturated after ~6 catches. A cap calibrated against an unmeasured
+>   capacity is guesswork dressed as a guard.
+> - The strongest circumstantial evidence yet: **~30 G presses in 7 seconds
+>   against a full pack, each running `hasRoomForItem` on a saturated grid,
+>   immediately before the character froze.**
 >
-> **Rule for every future system that grants items** (cooking, trade, loot):
-> stop on a **count**, well short of saturation. Never probe a full grid.
+> **Current mitigation:** remember the count at which the pack was seen full and
+> refuse on a plain `getNumItems()` comparison while at or above it — zero grid
+> probes while full, no matter how hard the key is mashed. Treat that count as a
+> learned capacity and stop one item short of it next load.
 >
-> This is avoidance, not root cause — what Kenshi does internally when a script
-> queries a saturated inventory is still unknown.
+> **Rule for every future item-granting system** (cooking, trade, loot): gate on
+> a **count**, never on a probe, and never probe a grid already known to be full.
 
 ### Original investigation (kept — it is the record of what was eliminated)
 
