@@ -915,7 +915,7 @@ end
 -- How far above the fisher's position the bar floats. Tunable from one place
 -- because the correct value -- and even which axis is "up" in Kenshi -- is not
 -- yet confirmed. Fishing.setBarHeight(n) adjusts it live.
-BAR_HEIGHT = 12.0
+local BAR_HEIGHT = 12.0
 
 -- ---------------------------------------------------------------------------
 -- Fishing.unstick() -- try to recover a character whose GUI has locked up
@@ -1146,8 +1146,11 @@ local function barUpdate(s, character, frac, caption)
         -- One log line, not per-frame spam.
         if not Fishing._barPosLogged then
             Fishing._barPosLogged = true
-            log(("bar position basis: x=%.1f y=%.1f z=%.1f  (+%.1f on Y)")
-                :format(p.x, p.y or 0, p.z, BAR_HEIGHT))
+            -- %s not %f: this threw once with "number expected, got nil" and took
+            -- the whole onCharsUpdate handler down for that frame. A DIAGNOSTIC
+            -- must never be able to kill the tick it is diagnosing.
+            log(("bar position basis: x=%s y=%s z=%s  (+%s on Y)"):format(
+                tostring(p.x), tostring(p.y), tostring(p.z), tostring(BAR_HEIGHT)))
         end
         pcall(function()
             bar:setPosition({ x = p.x, y = (p.y or 0) + BAR_HEIGHT, z = p.z })
