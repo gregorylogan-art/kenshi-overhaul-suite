@@ -109,8 +109,15 @@ inherit `ScreenLabel`'s surface despite sharing `kenshi/gui/ScreenLabel.h`:
 | `destroy` | ❌ nil (errors) | **no teardown → one bar per character, reused forever** |
 | `destroyed` | ❌ nil | |
 
-- **Range is 0..1000, not 0..1.** From `data/gui/layout/Kenshi_ProgressBarPanel.layout`:
-  `<Property key="Range" value="1000"/>`. Matches the binding's `progress | integer`.
+- **The FIELD and the METHOD take DIFFERENT SCALES.** This one cost a test cycle:
+  ```lua
+  bar.progress = math.floor(frac * 1000)   -- FIELD:  0..1000 (widget RangePosition)
+  bar:setProgress(frac)                    -- METHOD: 0..1 fraction
+  ```
+  `Range=1000` comes from `data/gui/layout/Kenshi_ProgressBarPanel.layout` and
+  matches the binding's `progress | integer`. But feeding a 1000-scale value to
+  `setProgress()` **clamps to full** — the bar then snaps between 0 and 100%
+  instead of filling, which reads as "it refreshes rather than loads".
 - An unpositioned bar sits at **world origin** — invisible, looks like failure.
 - **Y is UP.** Confirmed: character `y=88.9` vs `terrainH=88.88` same session.
   `+2` units is ankle height; head height is roughly `+12`.
@@ -185,7 +192,25 @@ Ownerships, RootObject, ShopTrader, UseableStuff. `addMoney`/`setMoney` are on
 
 ---
 
-## 7. OPEN: the character-freeze bug (#21 / #37)
+## 7. The character-freeze bug (#21 / #37) — LIKELY RESOLVED
+
+> **Resolution (2026-08-02).** Greg's call — *"i 100% dont think its exp i think
+> 100% its inventory"* — was correct. Switching the stop condition from
+> `hasRoomForItem` (a **grid probe**) to `getNumItems()` (a **plain count**), and
+> halting 10 catches into a load, stopped the freeze.
+>
+> **The trigger was our own interaction with a saturated inventory**, not any
+> item we created. The previous guard stopped auto-fishing *at* the boundary but
+> still probed it, and the last recurrence landed on the exact cast that first
+> hit `hasRoomForItem=false`.
+>
+> **Rule for every future system that grants items** (cooking, trade, loot):
+> stop on a **count**, well short of saturation. Never probe a full grid.
+>
+> This is avoidance, not root cause — what Kenshi does internally when a script
+> queries a saturated inventory is still unknown.
+
+### Original investigation (kept — it is the record of what was eliminated)
 
 **Symptom.** Character stops taking orders; inventory will not open; stats screen
 flashes open and closes; **the world keeps running normally**. No error is ever
