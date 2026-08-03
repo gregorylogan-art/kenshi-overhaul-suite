@@ -89,7 +89,7 @@ local CFG = {
     -- read that does not inspect the packing grid -- and stop after this many
     -- catches on one load. The player empties, presses G, and the baseline
     -- re-takes.
-    maxCatchesPerLoad = 10,
+    maxCatchesPerLoad = 6,
 
     -- Floating "what is this character doing" bar over the fisher's head.
     -- Greg: "without lua up its hard to know if im fishing or not."
@@ -534,6 +534,46 @@ function Fishing.underCatchCap(s, character)
     -- The player emptied the pack: re-baseline downward so fishing resumes.
     if n < s.baseItems then s.baseItems = n end
     return (n - s.baseItems) < CFG.maxCatchesPerLoad
+end
+
+-- ---------------------------------------------------------------------------
+-- NEVER PROBE A GRID WE ALREADY KNOW IS FULL
+-- ---------------------------------------------------------------------------
+-- The 20:14 log is the clearest evidence yet. Greg mashed G against a full pack
+-- and got ~30 presses in 7 seconds, EACH ONE running hasRoomForItem against a
+-- saturated grid, immediately before the character froze.
+--
+-- The catch cap did not save us because it was calibrated blind: it stopped
+-- after 10 catches, but the pack SATURATES AT 15 ITEMS and he began with 9. It
+-- never came close to firing, and every stop came from the hasRoomForItem
+-- backstop -- i.e. from the very probe we were trying to avoid.
+--
+-- So remember the count at which this pack was observed full. While the pack is
+-- at or above that count, refuse WITHOUT touching the grid; getNumItems() is a
+-- plain count and is safe to call. When the player empties the pack the count
+-- drops below the mark and probing resumes naturally.
+--
+-- Mashing G on a full pack now costs one cheap count per press and ZERO grid
+-- probes, instead of one probe per press.
+function Fishing.notePackFull(s, character)
+    local n = Fishing.itemCount(character)
+    if n then s.fullAtCount = n end
+end
+
+function Fishing.packKnownFull(s, character)
+    if not s.fullAtCount then return false end
+    local n = Fishing.itemCount(character)
+    if not n then return false end          -- unknown -> fall through to the probe
+    -- MARGIN OF ONE. fullAtCount is a LEARNED CAPACITY for this pack, so stop one
+    -- item short of the count that was observed saturated. That way the next load
+    -- halts BEFORE reaching the state under suspicion, instead of rediscovering
+    -- it with another probe every time.
+    local limit = s.fullAtCount - 1
+    if n < limit then
+        s.fullAtCount = nil                 -- room was made; probe again
+        return false
+    end
+    return true
 end
 
 function Fishing.hasPackHeadroom(character)
@@ -1298,11 +1338,22 @@ local function beginCast(character, name)
     -- that keeps us away from a saturated grid entirely. hasRoomForItem stays
     -- below it as a backstop, but by then we are already at the boundary that
     -- is under suspicion for the freeze.
+    -- CHEAP GATE FIRST, and it must not touch the grid. A player mashing G at a
+    -- full pack previously fired one hasRoomForItem per press.
+    if Fishing.packKnownFull(s, character) then
+        if not s.fullLogged then
+            s.fullLogged = true
+            log(name .. ": PACK FULL -- empty some items, then press G again")
+        end
+        return
+    end
+    s.fullLogged = nil
     if not Fishing.underCatchCap(s, character) then
         log(name .. ": PACK FULL (catch cap) -- empty the pack, then press G again")
         return
     end
     if not Fishing.hasPackHeadroom(character) then
+        Fishing.notePackFull(s, character)   -- remember, so we never re-probe
         log(name .. ": PACK FULL -- make space before fishing (issue #21 guard)")
         return
     end
@@ -1371,6 +1422,7 @@ local function finishCast(character, name)
     -- ever get here, but when it does not, this cannot miss.
     if not granted and type(how) == "string" and how:find("no room", 1, true) then
         s.auto = false
+        Fishing.notePackFull(s, character)
         log(name .. ": auto-fish STOPPED -- pack full (grant refused)")
     end
 end
@@ -1395,12 +1447,18 @@ local function rearmIfAuto(character, name)
         log(name .. ": auto-fish STOPPED -- " .. why)
         return
     end
+    if Fishing.packKnownFull(s, character) then
+        s.auto = false
+        log(name .. ": auto-fish STOPPED -- pack full")
+        return
+    end
     if not Fishing.underCatchCap(s, character) then
         s.auto = false
         log(name .. ": auto-fish STOPPED -- catch cap reached (pack not saturated)")
         return
     end
     if not Fishing.hasPackHeadroom(character) then
+        Fishing.notePackFull(s, character)
         s.auto = false
         log(name .. ": auto-fish STOPPED -- pack full")
         return
