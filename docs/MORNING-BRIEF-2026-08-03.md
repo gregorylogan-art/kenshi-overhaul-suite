@@ -109,34 +109,67 @@ inventory and only the finished good ever crosses over.
 
 ---
 
-## What I deliberately did NOT do
+## Second session (while you were out) — migration done
 
-**I did not migrate fishing onto `Items`.** It has its own working bag, so there
-is now duplicated logic — real debt, and I'd normally remove it. But fishing is
-the one thing you've verified live, and a behaviour-preserving refactor still
-needs a live run to *confirm* it preserved behaviour. Doing that while you slept
-would mean handing you a possibly-broken fishing loop with no way to have known.
+**Fishing now runs on the shared `Items` ledger.** Done in the safe order:
 
-It's a ~20-minute job with you awake to test. That's the first thing I'd pick up.
+1. **Characterization tests written first** (17 checks), pinning the behaviour
+   you'd already verified live — per-item counts, the drain loop, and the case
+   that matters most: *a refusal keeps the remainder banked rather than
+   destroying the catch.*
+2. Migration.
+3. Same tests re-run against the migrated path.
+
+The tests **call** the real entry points rather than replicating their bodies —
+a test that reimplements the code it checks passes happily while the shipped
+path rots underneath it, which is exactly how the inert skill model survived a
+whole session here. One assertion exists purely to prove the migration happened:
+banking must land in `Items.counts`, not a private table.
+
+`Items` renumbered 15 → 08 so it loads before its consumers, but it's resolved
+**lazily** per call, so ordering is a convenience rather than a dependency. If
+`Items` ever fails to load, fishing degrades to the old private bag instead of
+erroring.
+
+### A real bug caught before it reached you
+
+Fishing banks **"Small Fish"**. Cooking's raw list is headed by **"Raw Fish"**
+(your FCS item). *Both resolve*, so cooking would have picked "Raw Fish", found
+none banked, and reported **"nothing to cook" over a bagful of fish**.
+
+In a live session that reads as *cooking is broken*, not as two systems
+disagreeing about a name. Fixed — what's in the bag wins — and pinned with a
+HANDOFF test that banks exactly what fishing produces and consumes exactly what
+cooking would.
+
+**This is the harness paying for itself on day one.**
 
 ---
 
 ## Suggested order when you're back
 
-1. **Restart and confirm nothing regressed** — the fishing loop is untouched, but
-   two new modules now load at startup.
-2. **`Cooking.status()`** then **`Cooking.cook(char, 5)`** — needs raw fish
-   banked first. Will tell us whether your FCS item names resolve.
-3. **Migrate fishing onto `Items`** — kills the duplication, with you there to
-   verify.
-4. Then #40 (fishing spots) or the VS2010 toolset for #42's real menu.
+1. **Restart and fish a normal run.** This is the one that matters — fishing now
+   banks through a different code path than the one you verified. Same
+   behaviour by 17 headless checks, but only a live run proves the mint.
+2. **`Cooking.status()`** with fish banked, then **`Cooking.cook(char, 5)`** —
+   tells us whether your FCS item names resolve against a real character.
+3. Then #40 (fishing spots) or the VS2010 toolset for #42's real menu.
 
 ---
 
 ## Numbers
 
 - 3 module selftests: **31 checks, 0 failed**
-- Regression suite: **30 checks, 0 failed**
+- 3 test suites (regressions / fishing bag / handoff): **53 checks, 0 failed**
 - Lint: **0 findings across 8 files**
-- Commits pushed: 4
+- Commits pushed: 7
 - **Live-verified: nothing.** All of the above is headless.
+
+## Rollback, if anything is wrong
+
+Every change is a separate commit, so a single revert undoes exactly one thing:
+
+```bash
+git revert 6ff89bf   # cooking name-mismatch fix
+git revert b511f64   # fishing -> Items migration
+```
