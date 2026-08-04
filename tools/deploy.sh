@@ -71,7 +71,7 @@ if [[ -f "$REPO/tools/luarun.py" && -n "$PY" ]]; then
   echo "--- regression tests ---"
   if ! "$PY" "$REPO/tools/luarun.py" --tests \
         --modules "05_wsm.lua,08_items.lua,10_fishing.lua,24_cooking.lua" 2>&1 \
-        | grep -E "passed, [0-9]+ failed|FAILED|ERROR"; then
+        | grep -iE "passed, [0-9]+ failed|FAILED|error|expected"; then
     echo "  (no test output)"
   fi
   if ! "$PY" "$REPO/tools/luarun.py" --tests \

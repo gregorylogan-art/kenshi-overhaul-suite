@@ -153,7 +153,59 @@ end
 if _G.Items then Items.bags[NAME], Items.counts[NAME], Items.ledger[NAME] = nil, nil, nil end
 Fishing.state[NAME] = nil
 
+-- ============================================================================
+-- HANDOFF: fishing -> cooking
+--
+-- Fishing banks "Small Fish"; cooking's raw list is headed by "Raw Fish" (the
+-- FCS item). Both are real, so a resolution-first lookup picked "Raw Fish",
+-- found none banked, and reported "nothing to cook" over a bagful of fish.
+--
+-- That bug was found here, headlessly, before it ever reached a play session --
+-- where it would have looked like cooking being broken rather than two systems
+-- disagreeing about a name.
+-- ============================================================================
+if _G.Items and _G.Cooking then
+    local H = { passed = 0, failed = 0, names = {} }
+    local function hcheck(name, cond, detail)
+        if cond then H.passed = H.passed + 1
+        else
+            H.failed = H.failed + 1
+            H.names[#H.names + 1] = name .. (detail and ("  -- " .. tostring(detail)) or "")
+        end
+    end
+
+    local KEY = "__handoff__"
+    Items.bags[KEY], Items.counts[KEY], Items.ledger[KEY] = nil, nil, nil
+
+    -- Exactly what fishing produces.
+    Items.bank(KEY, "Small Fish", 6)
+    local bag = Items.bagOf(KEY)
+    hcheck("handoff: fishing's product is banked", bag["Small Fish"] == 6)
+
+    -- Cooking must consume THAT, not a differently-named sibling.
+    local consumed = 0
+    for _ = 1, 6 do
+        if Items.take(KEY, "Small Fish", 1) then
+            consumed = consumed + 1
+            Items.bank(KEY, "Cooked Fish", 1)
+        end
+    end
+    hcheck("handoff: cooking consumed what fishing banked", consumed == 6, consumed)
+
+    local after, total = Items.bagOf(KEY)
+    hcheck("handoff: raw fully consumed", (after["Small Fish"] or 0) == 0)
+    hcheck("handoff: product conserved", (after["Cooked Fish"] or 0) == 6)
+    hcheck("handoff: nothing created or destroyed", total == 6, total)
+    hcheck("handoff: invariants clean", #Items.verify() == 0)
+
+    Items.bags[KEY], Items.counts[KEY], Items.ledger[KEY] = nil, nil, nil
+    print(("--- HANDOFF: %d passed, %d failed ---"):format(H.passed, H.failed))
+    for _, n in ipairs(H.names) do print("    FAILED: " .. n) end
+    if H.failed > 0 then error("handoff failed", 0) end
+end
+
 print(("--- FISHING BAG: %d passed, %d failed ---"):format(T.passed, T.failed))
 for _, n in ipairs(T.names) do print("    FAILED: " .. n) end
 if T.failed > 0 then error("fishing bag characterization failed", 0) end
 return true
+

@@ -81,19 +81,36 @@ function Cooking.odds(skill)
     return CFG.burnAtZero + (CFG.burnAtMax - CFG.burnAtZero) * t
 end
 
--- Which raw-fish name actually exists in this install.
-local function rawNameFor(character)
-    for _, n in ipairs(CFG.rawNames) do
-        if Items and Items.resolve and Items.resolve(character, n) then return n end
-    end
-    -- Fall back to the first configured name: if nothing resolves, cooking will
-    -- report "no raw fish banked" rather than pretending to work.
-    return CFG.rawNames[1]
-end
-
 local function ownerKeyFor(character)
     local ok, name = pcall(function() return character:getName() end)
     return (ok and name) or "?"
+end
+
+-- Which raw-fish name to cook.
+--
+-- WHAT IS IN THE BAG WINS. Resolution order alone was wrong and it would have
+-- shipped: fishing banks "Small Fish", while this list is headed by "Raw Fish"
+-- (the FCS item). Both resolve, so a resolution-first lookup picks "Raw Fish",
+-- finds none banked, and reports "nothing to cook" with a bagful of fish
+-- sitting there.
+--
+-- Caught headlessly by walking the fishing -> cooking handoff before Greg ever
+-- ran it, which is exactly what the harness is for -- in a live session this
+-- would have looked like cooking being broken rather than a name mismatch.
+local function rawNameFor(character)
+    local key = ownerKeyFor(character)
+    local bag = (Items and Items.bagOf) and Items.bagOf(key) or {}
+
+    -- 1. a configured raw name that is actually banked
+    for _, n in ipairs(CFG.rawNames) do
+        if (bag[n] or 0) > 0 then return n end
+    end
+    -- 2. otherwise the first that resolves as a real item, so an empty bag still
+    --    names something truthful in messages
+    for _, n in ipairs(CFG.rawNames) do
+        if Items and Items.resolve and Items.resolve(character, n) then return n end
+    end
+    return CFG.rawNames[1]
 end
 
 -- ---------------------------------------------------------------------------

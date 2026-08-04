@@ -291,4 +291,4 @@ function Items.selftest()
     return failed == 0
 end
 
-log("15_items loaded -- Items.bank / .collect / .take / .verify / .selftest")
+log("08_items loaded -- Items.bank / .collect / .take / .verify / .selftest")
