@@ -68,14 +68,28 @@ fi
 # this project actually shipped. They need no Kenshi and no game running, so
 # there is no excuse for a deploy that skips them.
 if [[ -f "$REPO/tools/luarun.py" && -n "$PY" ]]; then
+  # SELFTESTS ARE GATED TOO. They were not, and a failing FishTable selftest
+  # deployed cleanly because only tests/ was checked -- a gate with a hole in
+  # it is worse than none, because it is trusted.
+  echo "--- module selftests ---"
+  "$PY" "$REPO/tools/luarun.py" --selftest 2>&1 | grep -iE "SELFTEST:|ran,|FAIL"
+  if ! "$PY" "$REPO/tools/luarun.py" --selftest >/dev/null 2>&1; then
+    if [[ "$FORCE" != "--force" ]]; then
+      echo "REFUSING TO DEPLOY -- module selftests failed." >&2
+      exit 5
+    fi
+    echo "(--force: deploying despite selftest failures)"
+  fi
+  echo
+
   echo "--- regression tests ---"
   if ! "$PY" "$REPO/tools/luarun.py" --tests \
-        --modules "05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,16_storage.lua,18_economy.lua,24_cooking.lua" 2>&1 \
+        --modules "05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,12_fishtable.lua,16_storage.lua,18_economy.lua,24_cooking.lua" 2>&1 \
         | grep -iE "passed, [0-9]+ failed|FAILED|error|expected"; then
     echo "  (no test output)"
   fi
   if ! "$PY" "$REPO/tools/luarun.py" --tests \
-        --modules "05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,16_storage.lua,18_economy.lua,24_cooking.lua" >/dev/null 2>&1; then
+        --modules "05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,12_fishtable.lua,16_storage.lua,18_economy.lua,24_cooking.lua" >/dev/null 2>&1; then
     if [[ "$FORCE" != "--force" ]]; then
       echo "REFUSING TO DEPLOY -- regression tests failed." >&2
       exit 4
