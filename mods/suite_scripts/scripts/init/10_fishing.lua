@@ -1005,6 +1005,162 @@ function Fishing.closePack()
     return ok
 end
 
+-- ---------------------------------------------------------------------------
+-- A SEPARATE CATCH PANE  (Greg: "not collect but opens a inventory seperate pane")
+-- ---------------------------------------------------------------------------
+-- This is the mining-window shape, and it is what Kenshi itself does for every
+-- gathering profession: product lands in its OWN container and the player drags
+-- it out. Auto-collecting into the character's pack was the wrong call -- it
+-- takes the decision away from the player and, worse, it is the exact write
+-- pattern that froze characters (#37).
+--
+-- The chain, all from bound API:
+--     ContainerItem.inventory              -> Inventory   (RW field)
+--     Inventory:getInventoryGUI()          -> InventoryGUI
+--     InventoryGUI:show(true)              -> the pane
+--
+-- Which container? The character's own backpack, reached via
+-- InventoryGUI:getBackpack(). That needs no minting and no new item: a fisher
+-- wearing a pack gets a real second pane for free.
+--
+-- ENTIRELY UNVERIFIED. Every step is pcall-wrapped and logged BEFORE it acts, so
+-- a hard crash names the call that caused it -- the technique that identified
+-- the container crash class.
+function Fishing.probeContainer()
+    log("=== catch-pane probe (nothing will be shown) ===")
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then log("  select a character first") return end
+
+    log("  step 1: character:getInventory()")
+    local okI, inv = pcall(function() return c:getInventory() end)
+    log("    -> " .. (okI and type(inv) or "FAILED"))
+    if not okI or not inv then return end
+
+    log("  step 2: inv:getInventoryGUI()")
+    if type(inv.getInventoryGUI) ~= "function" then log("    NOT BOUND") return end
+    local okG, gui = pcall(function() return inv:getInventoryGUI() end)
+    log("    -> " .. (okG and type(gui) or ("ERROR " .. tostring(gui))))
+    if not okG or not gui then return end
+
+    log("  step 3: gui:getBackpack()")
+    if type(gui.getBackpack) ~= "function" then log("    NOT BOUND") return end
+    local okB, pack = pcall(function() return gui:getBackpack() end)
+    log("    -> " .. (okB and type(pack) or ("ERROR " .. tostring(pack))))
+    if not okB or not pack then
+        log("    (no backpack worn -- a separate pane needs one, or a minted container)")
+        return
+    end
+
+    log("  step 4: pack.inventory")
+    local okPI, packInv = pcall(function() return pack.inventory end)
+    log("    -> " .. (okPI and type(packInv) or "ERROR"))
+    if not okPI or not packInv then return end
+
+    log("  step 5: packInv:getInventoryGUI()")
+    local okPG, packGui = pcall(function() return packInv:getInventoryGUI() end)
+    log("    -> " .. (okPG and type(packGui) or ("ERROR " .. tostring(packGui))))
+    log("=== end probe -- if step 5 returned a value, a separate pane works ===")
+end
+
+-- Open a SEPARATE pane for the catch if one is reachable, else the character's
+-- own pack. Returns which was used so the caller can report honestly rather than
+-- claiming a separate pane it did not get.
+function Fishing.openCatchPane(character)
+    if not character then
+        local ok, c = pcall(function() return getSelectedCharacter() end)
+        if not ok or not c then return false, "no character" end
+        character = c
+    end
+
+    local okI, inv = pcall(function() return character:getInventory() end)
+    if not okI or not inv or type(inv.getInventoryGUI) ~= "function" then
+        return false, "no inventory GUI"
+    end
+    local okG, gui = pcall(function() return inv:getInventoryGUI() end)
+    if not okG or not gui then return false, "no InventoryGUI" end
+
+    -- Prefer a genuinely separate container pane.
+    if type(gui.getBackpack) == "function" then
+        local okB, pack = pcall(function() return gui:getBackpack() end)
+        if okB and pack then
+            local okPI, packInv = pcall(function() return pack.inventory end)
+            if okPI and packInv and type(packInv.getInventoryGUI) == "function" then
+                local okPG, packGui = pcall(function() return packInv:getInventoryGUI() end)
+                if okPG and packGui then
+                    local okS = pcall(function() packGui:show(true) end)
+                    if okS then
+                        Fishing._panes = { packGui, gui }
+                        return true, "backpack pane"
+                    end
+                end
+            end
+        end
+    end
+
+    -- Fall back to the character's own pack window.
+    local okS, err = pcall(function() gui:show(true) end)
+    if not okS then return false, "show failed: " .. tostring(err) end
+    Fishing._panes = { gui }
+    return true, "character pane"
+end
+
+-- Put the banked catch into a real container, then show that container's pane.
+--
+-- Preference order, and it matters:
+--   1. the character's BACKPACK -- a genuinely separate pane, and a write that
+--      never touches the character's main grid
+--   2. the character's own inventory -- correct but not separate, so it is
+--      reported as a fallback rather than passed off as the real thing
+--
+-- Whatever will not fit STAYS BANKED. A full container costs one refused mint,
+-- never a destroyed catch.
+function Fishing.depositAndShow(character, ownerName)
+    local I = itemsOrNil()
+    if not I then return false, "items module not loaded" end
+
+    local okI, inv = pcall(function() return character:getInventory() end)
+    if not okI or not inv then return false, "no inventory" end
+
+    -- Find a container inventory to deposit into.
+    local targetInv, targetGui, kind = nil, nil, nil
+    if type(inv.getInventoryGUI) == "function" then
+        local okG, gui = pcall(function() return inv:getInventoryGUI() end)
+        if okG and gui and type(gui.getBackpack) == "function" then
+            local okB, pack = pcall(function() return gui:getBackpack() end)
+            if okB and pack then
+                local okPI, packInv = pcall(function() return pack.inventory end)
+                if okPI and packInv then
+                    local okPG, packGui = pcall(function() return packInv:getInventoryGUI() end)
+                    if okPG and packGui then
+                        targetInv, targetGui, kind = packInv, packGui, "backpack"
+                    end
+                end
+            end
+        end
+        if not targetInv and okG and gui then
+            targetGui, kind = gui, "character pack"
+        end
+    end
+
+    local moved, remaining, why = I.collect(character, ownerName, targetInv)
+    log(("%s: deposited %d into %s%s"):format(
+        ownerName, moved, tostring(kind or "inventory"),
+        remaining > 0 and (" (" .. remaining .. " still banked: " .. tostring(why) .. ")") or ""))
+
+    if targetGui then
+        local okS = pcall(function() targetGui:show(true) end)
+        if okS then Fishing._panes = { targetGui } end
+    end
+    return true, kind
+end
+
+function Fishing.closeCatchPane()
+    for _, g in ipairs(Fishing._panes or {}) do
+        pcall(function() g:show(false) end)
+    end
+    Fishing._panes = nil
+end
+
 -- Fishing.probeInvGui() -- report what is reachable WITHOUT opening anything.
 function Fishing.probeInvGui()
     log("=== inventory-GUI probe (nothing will be shown) ===")
@@ -1899,20 +2055,21 @@ if type(registerHandler) == "function" then
             -- every five seconds -- which is the rule that fixed the freeze.
             -- H remains as an explicit collect for mid-run top-ups.
             local _, n = Fishing.bagFor(name)
-            if n > 0 then
+            if n > 0 and CFG.openPackOnCollect then
+                -- DEPOSIT INTO A CONTAINER AND OPEN ITS PANE, rather than
+                -- auto-collecting into the character's main grid.
+                --
+                -- Greg: "not collect but opens a inventory seperate pane." That
+                -- is the mining-window shape and it is what Kenshi does for
+                -- every gathering profession -- product lands in its own
+                -- container and the player drags it out. Auto-collecting took
+                -- the decision away from the player, and it is also the exact
+                -- write pattern behind #37.
+                log(("%s: auto-fish OFF -- depositing %d"):format(name, n))
+                Fishing.depositAndShow(character, name)
+            elseif n > 0 then
                 log(("%s: auto-fish OFF -- collecting %d"):format(name, n))
                 Fishing.collect()
-                -- CLOSE THE LOOP ON SCREEN. Collecting already worked, but the
-                -- only confirmation was a log line -- so from the player's side
-                -- the fish arrived invisibly and cooking looked impossible
-                -- without a console command. Opening Kenshi's own pack window
-                -- shows the catch landing, in the UI the player already knows.
-                if CFG.openPackOnCollect then
-                    local okOpen, whyOpen = Fishing.openPack(character)
-                    if not okOpen then
-                        log(name .. ": (pack window unavailable -- " .. tostring(whyOpen) .. ")")
-                    end
-                end
             else
                 log(name .. ": auto-fish OFF")
             end

@@ -144,9 +144,18 @@ end
 -- Bounded, player-initiated, and it stops at the first refusal with the
 -- remainder still banked. A full pack therefore costs ONE refused grant rather
 -- than one every few seconds forever, which was the shape that froze characters.
-local function mintInto(character, gd)
-    local okInv, inv = pcall(function() return character:getInventory() end)
-    if not okInv or not inv then return false, "no inventory" end
+-- targetInv lets a caller mint into a CONTAINER's inventory rather than the
+-- character's main grid -- the mining-window shape, where product lands in its
+-- own pane and the player drags it out. That is both what Kenshi does for every
+-- gathering profession and, plausibly, safer: #37's freeze was specifically
+-- about writing into a character's own inventory.
+local function mintInto(character, gd, targetInv)
+    local inv = targetInv
+    if not inv then
+        local okInv, got = pcall(function() return character:getInventory() end)
+        if not okInv or not got then return false, "no inventory" end
+        inv = got
+    end
     local okH, hand = pcall(function() return inv:getHandle() end)
     if not okH or not hand then return false, "no inventory handle" end
 
@@ -176,7 +185,7 @@ local function mintInto(character, gd)
     return false, "addItem error: " .. tostring(res)
 end
 
-function Items.collect(character, ownerKey)
+function Items.collect(character, ownerKey, targetInv)
     if not character then return 0, 0, "no character" end
     Items.stats.collectCalls = Items.stats.collectCalls + 1
 
@@ -192,7 +201,7 @@ function Items.collect(character, ownerKey)
         else
             for _ = 1, n do
                 Items.stats.inventoryWrites = Items.stats.inventoryWrites + 1
-                local ok, why = mintInto(character, gd)
+                local ok, why = mintInto(character, gd, targetInv)
                 if not ok then reason = why break end
                 bag[itemName] = bag[itemName] - 1
                 Items.counts[ownerKey] = Items.counts[ownerKey] - 1
