@@ -101,6 +101,29 @@ function Economy.mint(vendorKey, amount, why)
     return v.float
 end
 
+-- The audited counterpart to mint: money LEAVING the world.
+--
+-- Added because the invariant caught its own selftest cheating. The test lowered
+-- a vendor's float by assigning the field directly, to simulate a shop that had
+-- spent up -- and INV1 correctly reported that cats had vanished with no record.
+--
+-- The lesson generalises beyond the test: a currency needs a way OUT as much as
+-- a way in. A vendor restocking from a distant town, a caravan taking takings
+-- away, taxes -- all remove cats, and all must be recorded or the conservation
+-- check becomes noise everyone learns to ignore.
+function Economy.drain(vendorKey, amount, why)
+    amount = tonumber(amount) or 0
+    if amount <= 0 then return nil, "amount must be positive" end
+    local v = Economy.vendors[vendorKey]
+    if not v then return nil, "unknown vendor" end
+    if amount > v.float then amount = v.float end   -- never below zero (INV2)
+    v.float = v.float - amount
+    Economy.minted = Economy.minted - amount
+    Economy.mintLog[#Economy.mintLog + 1] =
+        { vendor = vendorKey, amount = -amount, why = why or "unstated" }
+    return v.float
+end
+
 local function itemsOrNil()
     local ok, m = pcall(function() return _G.Items end)
     if ok and type(m) == "table" and type(m.bank) == "function" then return m end
@@ -233,14 +256,17 @@ function Economy.selftest()
     check("cooking adds value",
           Economy.priceOf("Cooked Fish") > Economy.priceOf("Raw Fish"))
 
-    -- a vendor cannot spend what it does not have
-    Economy.vendors[VEND].float = 60
+    -- a vendor cannot spend what it does not have.
+    -- Drained rather than assigned: poking the field directly is exactly what
+    -- INV1 caught, and a test that cheats past an invariant is worse than no
+    -- test -- it teaches you to distrust the check.
+    Economy.drain(VEND, Economy.floatOf(VEND) - 60, "selftest: simulate a spent-up shop")
     local e2, s2, why2 = Economy.sell(VEND, SELLER, "Cooked Fish", 6)
     check("sale clamps to what the vendor can afford", s2 == 1, s2)
     check("...and pays only for that", e2 == 55, e2)
     check("float never goes negative", Economy.floatOf(VEND) >= 0)
 
-    Economy.vendors[VEND].float = 0
+    Economy.drain(VEND, Economy.floatOf(VEND), "selftest: shop fully spent")
     local e3, s3, why3 = Economy.sell(VEND, SELLER, "Cooked Fish", 1)
     check("broke vendor buys nothing", s3 == 0 and e3 == 0)
     check("...and says why", type(why3) == "string" and why3:find("no cats") ~= nil, why3)
@@ -248,7 +274,10 @@ function Economy.selftest()
     local e4, s4, why4 = Economy.sell(VEND, SELLER, "Nonexistent", 1)
     check("unpriced item refused", s4 == 0 and why4 ~= nil)
 
+    check("drain refuses non-positive", Economy.drain(VEND, 0) == nil)
+    check("drain cannot go below zero", Economy.floatOf(VEND) >= 0)
     check("invariants still clean at the end", #Economy.verify() == 0)
+    for _, m in ipairs(Economy.verify()) do log("    " .. m) end
 
     Economy.vendors, Economy.earnings, Economy.minted, Economy.mintLog = {}, {}, 0, {}
     for _, k in ipairs({ SELLER, "vendor:" .. VEND }) do

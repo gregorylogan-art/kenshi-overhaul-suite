@@ -118,7 +118,7 @@ def main() -> int:
     ap.add_argument("--tests", action="store_true")
     ap.add_argument("--eval", default="")
     ap.add_argument("--file", default="")
-    ap.add_argument("--modules", default="05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,16_storage.lua,24_cooking.lua")
+    ap.add_argument("--modules", default="05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,16_storage.lua,18_economy.lua,24_cooking.lua")
     args = ap.parse_args()
 
     try:
@@ -179,7 +179,7 @@ def main() -> int:
         ok, err = lua.run(
             r"""
             local ran, failed = 0, 0
-            for _, name in ipairs({ "Items", "Skills", "Storage", "Cooking", "WSM" }) do
+            for _, name in ipairs({ "Items", "Skills", "Storage", "Economy", "Cooking", "WSM" }) do
                 local mod = _G[name]
                 if mod and type(mod.selftest) == "function" then
                     ran = ran + 1
