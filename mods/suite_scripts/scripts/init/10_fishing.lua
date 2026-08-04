@@ -1233,22 +1233,62 @@ end
 -- The bag is plain Lua state. Fishing performs no engine writes; collecting is
 -- one deliberate, bounded, player-initiated action.
 
+-- ---------------------------------------------------------------------------
+-- BRIDGE TO THE SHARED ITEMS LAYER (08_items.lua)
+-- ---------------------------------------------------------------------------
+-- The catch bag used to be a private table on each character's state. It is now
+-- the shared ledger, so fishing, cooking and any future producer all conserve
+-- through the same invariants (Items.verify) instead of three near-identical
+-- bags drifting apart.
+--
+-- Items is resolved LAZILY on every call, never cached at load: KenshiLua loads
+-- scripts in filename order, and a cached nil from load time would be permanent.
+-- Items is numbered 08 so it loads first, but the lazy read means the ordering
+-- is a convenience rather than a dependency.
+--
+-- If Items is missing entirely, fishing degrades to a private bag rather than
+-- erroring -- the same "must survive a missing dependency" discipline as
+-- StarFall's rule 4.
+local function itemsOrNil()
+    local ok, m = pcall(function() return _G.Items end)
+    if ok and type(m) == "table" and type(m.bank) == "function" then return m end
+    return nil
+end
+
+function Fishing.bankItem(ownerName, itemId)
+    local I = itemsOrNil()
+    if I then return I.bank(ownerName, itemId, 1) or 0 end
+    -- Fallback: the pre-migration private bag.
+    local s = stateFor(ownerName)
+    s.bag = s.bag or {}
+    s.bag[itemId] = (s.bag[itemId] or 0) + 1
+    s.bagCount = (s.bagCount or 0) + 1
+    return s.bagCount
+end
+
+function Fishing.bagFor(ownerName)
+    local I = itemsOrNil()
+    if I then return I.bagOf(ownerName) end
+    local s = stateFor(ownerName)
+    return s.bag or {}, s.bagCount or 0
+end
+
 -- Fishing.bag() -- show what the selected character has caught but not collected.
 function Fishing.bag()
     local ok, c = pcall(function() return getSelectedCharacter() end)
     if not ok or not c then log("bag: select a character first") return end
     local okN, name = pcall(function() return c:getName() end)
     name = (okN and name) or "?"
-    local s = stateFor(name)
-    if not s.bag or (s.bagCount or 0) == 0 then
+    local bag, count = Fishing.bagFor(name)
+    if count == 0 then
         log(name .. ": catch bag is empty")
         return 0
     end
-    log(("%s: catch bag (%d)"):format(name, s.bagCount))
-    for id, n in pairs(s.bag) do
+    log(("%s: catch bag (%d)"):format(name, count))
+    for id, n in pairs(bag) do
         log(("    %-22s x%d"):format(tostring(ITEM_NAMES[id] or id), n))
     end
-    return s.bagCount
+    return count
 end
 
 -- Fishing.showBag() -- put the catch bag ON SCREEN (J).
@@ -1266,12 +1306,13 @@ function Fishing.showBag()
     name = (okN and name) or "?"
     local s = stateFor(name)
 
+    local bag, count = Fishing.bagFor(name)
     local lines
-    if not s.bag or (s.bagCount or 0) == 0 then
+    if count == 0 then
         lines = name .. " -- catch bag empty"
     else
-        local parts = { ("%s -- CATCH BAG (%d)"):format(name, s.bagCount) }
-        for id, n in pairs(s.bag) do
+        local parts = { ("%s -- CATCH BAG (%d)"):format(name, count) }
+        for id, n in pairs(bag) do
             parts[#parts + 1] = ("  %s x%d"):format(tostring(ITEM_NAMES[id] or id), n)
         end
         parts[#parts + 1] = "  [H] collect into inventory"
@@ -1298,11 +1339,30 @@ function Fishing.collect()
     name = (okN and name) or "?"
     local s = stateFor(name)
 
+    -- DELEGATED to the shared layer. Items.collect owns the mint, the
+    -- fail-closed room check, and stopping at the first refusal with the
+    -- remainder still banked -- so there is exactly one implementation of the
+    -- only inventory write this project performs.
+    local I = itemsOrNil()
+    if I then
+        local moved, remaining, why = I.collect(c, name)
+        if moved == 0 and remaining == 0 then
+            log(name .. ": nothing to collect")
+        elseif why then
+            log(("%s: collected %d, %d still banked -- %s")
+                :format(name, moved, remaining, tostring(why)))
+        else
+            log(("%s: collected %d item(s); catch bag empty"):format(name, moved))
+        end
+        return moved
+    end
+
+    -- Fallback path, used only if Items failed to load.
+    local s = stateFor(name)
     if not s.bag or (s.bagCount or 0) == 0 then
         log(name .. ": nothing to collect")
         return 0
     end
-
     local moved, stoppedOn = 0, nil
     for id, n in pairs(s.bag) do
         for _ = 1, n do
@@ -1315,13 +1375,8 @@ function Fishing.collect()
         if s.bag[id] == 0 then s.bag[id] = nil end
         if stoppedOn then break end
     end
-
-    if stoppedOn then
-        log(("%s: collected %d, %d still banked -- %s")
-            :format(name, moved, s.bagCount, tostring(stoppedOn)))
-    else
-        log(("%s: collected %d item(s); catch bag empty"):format(name, moved))
-    end
+    log(("%s: collected %d (fallback path), %d banked -- %s")
+        :format(name, moved, s.bagCount or 0, tostring(stoppedOn)))
     return moved
 end
 
@@ -1535,7 +1590,7 @@ local function beginCast(character, name)
     -- there is otherwise NOTHING on screen telling the player they are
     -- accumulating anything -- the inventory stays empty until they collect.
     s.caption = pickCaption()
-    local held = s.bagCount or 0
+    local _, held = Fishing.bagFor(name)
     barUpdate(s, character, 0,
         held > 0 and (s.caption .. "   [" .. held .. " to collect - H]") or s.caption)
     -- Anchor the cast to a spot. Moving away cancels it (see the tick handler):
@@ -1577,12 +1632,14 @@ local function finishCast(character, name)
     -- until the player collects it. This is the whole point -- the fishing loop
     -- must not touch the character's inventory.
     if CFG.bankCatches then
-        s.bag = s.bag or {}
-        s.bag[itemId] = (s.bag[itemId] or 0) + 1
-        s.bagCount = (s.bagCount or 0) + 1
+        -- Routed through the shared Items layer (08_items.lua) rather than a
+        -- private table. One implementation of the engine law means cooking,
+        -- trade and loot cannot each re-derive it and get it subtly wrong, and
+        -- Items.verify()'s conservation invariants now cover every catch.
+        local held = Fishing.bankItem(name, itemId)
         log(("%s: CAUGHT %s%s | banked (%d in catch bag) | totals fish=%d junk=%d")
             :format(name, itemId, isGarbage and " (junk)" or "",
-                    s.bagCount, s.caught, s.garbage))
+                    held, s.caught, s.garbage))
         return
     end
 
@@ -1752,7 +1809,7 @@ if type(registerHandler) == "function" then
             -- still ONE bounded, player-initiated write rather than a write
             -- every five seconds -- which is the rule that fixed the freeze.
             -- H remains as an explicit collect for mid-run top-ups.
-            local n = s.bagCount or 0
+            local _, n = Fishing.bagFor(name)
             if n > 0 then
                 log(("%s: auto-fish OFF -- collecting %d"):format(name, n))
                 Fishing.collect()
@@ -1769,8 +1826,9 @@ if type(registerHandler) == "function" then
         --
         -- Safe against mashing: once the bag is empty this is a no-op, so
         -- repeated presses cannot repeat the write.
-        if (s.bagCount or 0) > 0 then
-            log(("%s: collecting %d before casting"):format(name, s.bagCount))
+        local _, pending = Fishing.bagFor(name)
+        if pending > 0 then
+            log(("%s: collecting %d before casting"):format(name, pending))
             Fishing.collect()
         end
 

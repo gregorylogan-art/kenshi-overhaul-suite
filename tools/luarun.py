@@ -118,7 +118,7 @@ def main() -> int:
     ap.add_argument("--tests", action="store_true")
     ap.add_argument("--eval", default="")
     ap.add_argument("--file", default="")
-    ap.add_argument("--modules", default="15_items.lua,24_cooking.lua")
+    ap.add_argument("--modules", default="05_wsm.lua,08_items.lua,10_fishing.lua,24_cooking.lua")
     args = ap.parse_args()
 
     try:
