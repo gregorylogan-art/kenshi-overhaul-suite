@@ -124,6 +124,10 @@ local CFG = {
     -- re-takes.
     maxCatchesPerLoad = 6,
 
+    -- Open Kenshi's own pack window when a catch is collected, so the fish are
+    -- SEEN arriving rather than only logged. Kill switch: Fishing.setOpenPack(false).
+    openPackOnCollect = true,
+
     -- Floating "what is this character doing" bar over the fisher's head.
     -- Greg: "without lua up its hard to know if im fishing or not."
     -- Kill switch: Fishing.setBar(false) if it ever misbehaves in the tick.
@@ -946,6 +950,84 @@ function Fishing.unstick()
     return true
 end
 
+-- ---------------------------------------------------------------------------
+-- THE NATIVE INVENTORY WINDOW
+-- ---------------------------------------------------------------------------
+-- Greg: "we can make it a menu just like a backpack inventory... it's not worth
+-- my time to pull it out of a command."
+--
+-- Correct, and it turns out we do not have to BUILD a menu at all. I previously
+-- concluded a menu was impossible from Lua, which was true for building one from
+-- scratch -- every GUI construction call returns opaque lightuserdata with no
+-- Widget binding. But Kenshi will happily open its OWN:
+--
+--     character:getInventory():getInventoryGUI():show(true)
+--
+-- InventoryGUI is a fully bound class: show / isVisible / setPositionReal /
+-- showBackpack / getInventory. So the "backpack menu" Greg asked for already
+-- exists in the game and simply needs opening -- moveable, familiar, and
+-- consistent with every other window because it IS every other window.
+--
+-- That reframes #42 completely: the C++ work was for a bespoke panel nobody
+-- needs if the native one can be summoned.
+--
+-- UNVERIFIED until run live. Every step is pcall-wrapped and logged BEFORE it
+-- acts, so a hard crash names the call that caused it.
+function Fishing.openPack(character)
+    if not character then
+        local ok, c = pcall(function() return getSelectedCharacter() end)
+        if not ok or not c then return false, "no character" end
+        character = c
+    end
+    log("openPack: getInventory()")
+    local okI, inv = pcall(function() return character:getInventory() end)
+    if not okI or not inv then return false, "no inventory" end
+
+    log("openPack: getInventoryGUI()")
+    if not inv.getInventoryGUI then return false, "getInventoryGUI not bound" end
+    local okG, gui = pcall(function() return inv:getInventoryGUI() end)
+    if not okG or not gui then return false, "no InventoryGUI: " .. tostring(gui) end
+
+    log("openPack: show(true)")
+    local okS, err = pcall(function() gui:show(true) end)
+    if not okS then return false, "show failed: " .. tostring(err) end
+
+    Fishing._packGui = gui
+    return true
+end
+
+-- Close it again -- "goes away when you walk away".
+function Fishing.closePack()
+    local gui = Fishing._packGui
+    if not gui then return false end
+    local ok = pcall(function() gui:show(false) end)
+    Fishing._packGui = nil
+    return ok
+end
+
+-- Fishing.probeInvGui() -- report what is reachable WITHOUT opening anything.
+function Fishing.probeInvGui()
+    log("=== inventory-GUI probe (nothing will be shown) ===")
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then log("  select a character first") return end
+    local okI, inv = pcall(function() return c:getInventory() end)
+    log("  getInventory()      -> " .. (okI and type(inv) or "FAILED"))
+    if not okI or not inv then return end
+    log("  .getInventoryGUI    -> " .. type(inv.getInventoryGUI))
+    if type(inv.getInventoryGUI) ~= "function" then return end
+    local okG, gui = pcall(function() return inv:getInventoryGUI() end)
+    log("  getInventoryGUI()   -> " .. (okG and type(gui) or ("ERROR: " .. tostring(gui))))
+    if not okG or not gui then return end
+    for _, m in ipairs({ "show", "isVisible", "setPositionReal", "showBackpack",
+                         "getInventory", "visible" }) do
+        local okM, v = pcall(function() return gui[m] end)
+        log(("    %-18s %s"):format(m, okM and type(v) or "ERROR"))
+    end
+    local okV, vis = pcall(function() return gui:isVisible() end)
+    log("  isVisible()         -> " .. (okV and tostring(vis) or "ERROR"))
+    log("=== end probe ===")
+end
+
 -- Fishing.probeBar() -- can we show a real floating progress bar?
 --
 -- Greg wants the mining/ore-style bar on a cast: "i have no idea, i just press g
@@ -1378,6 +1460,13 @@ function Fishing.collect()
     log(("%s: collected %d (fallback path), %d banked -- %s")
         :format(name, moved, s.bagCount or 0, tostring(stoppedOn)))
     return moved
+end
+
+-- Fishing.setOpenPack(false) -- stop the pack window opening on collect.
+function Fishing.setOpenPack(on)
+    CFG.openPackOnCollect = (on == true)
+    log("open pack on collect -> " .. tostring(CFG.openPackOnCollect))
+    return CFG.openPackOnCollect
 end
 
 -- Fishing.setBarHeight(3) -- raise or lower the bar, live, while looking at it.
@@ -1813,6 +1902,17 @@ if type(registerHandler) == "function" then
             if n > 0 then
                 log(("%s: auto-fish OFF -- collecting %d"):format(name, n))
                 Fishing.collect()
+                -- CLOSE THE LOOP ON SCREEN. Collecting already worked, but the
+                -- only confirmation was a log line -- so from the player's side
+                -- the fish arrived invisibly and cooking looked impossible
+                -- without a console command. Opening Kenshi's own pack window
+                -- shows the catch landing, in the UI the player already knows.
+                if CFG.openPackOnCollect then
+                    local okOpen, whyOpen = Fishing.openPack(character)
+                    if not okOpen then
+                        log(name .. ": (pack window unavailable -- " .. tostring(whyOpen) .. ")")
+                    end
+                end
             else
                 log(name .. ": auto-fish OFF")
             end
