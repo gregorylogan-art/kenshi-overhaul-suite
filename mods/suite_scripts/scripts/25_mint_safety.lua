@@ -63,6 +63,8 @@ log("========== MINT SAFETY ==========")
 -- 1. KNOWN GOOD: category-4 food that has displayed correctly all session.
 local foodGd = lookup("Small Fish", 4) or lookup("Dried Fish", 4)
 if foodGd then
+    -- L7-ALLOW: creates for inspection only -- never followed by addItem,
+    -- so nothing is ever added to an inventory grid. See file header.
     local ok, item = pcall(function()
         return factory:createItem(foodGd, hand, nil, nil, 0, nil) end)
     inspect(ok and item or nil, "GOOD  cat4 food @level0")
@@ -74,6 +76,7 @@ end
 local clothGd = lookup("Straw Hat", 3) or lookup("Rag Loincloth", 3)
 if clothGd then
     for _, lvl in ipairs({ 0, 1, -1 }) do
+        -- L7-ALLOW: creates for inspection only, never granted. See file header.
         local ok, item = pcall(function()
             return factory:createItem(clothGd, hand, nil, nil, lvl, nil) end)
         inspect(ok and item or nil, ("SUSPECT cat3 cloth @level%d"):format(lvl))
@@ -84,6 +87,7 @@ end
 
 -- 3. Does passing the item's own GameData into the optional slots help?
 if clothGd then
+    -- L7-ALLOW: creates for inspection only, never granted. See file header.
     local ok, item = pcall(function()
         return factory:createItem(clothGd, hand, clothGd, clothGd, 0, nil) end)
     inspect(ok and item or nil, "cat3 with GameData in both optional slots")

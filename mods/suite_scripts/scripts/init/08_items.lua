@@ -250,14 +250,26 @@ function Items.verify()
         end
     end
 
-    -- INV5 loop purity -- THE ENGINE LAW, made checkable. Inventory writes may
-    -- only ever happen inside collect(), so their count can never exceed the
-    -- number of collect calls times the largest possible bag. The weaker but
-    -- unambiguous form: zero collect calls must mean zero writes. If a loop ever
-    -- starts writing to an inventory again, this is what catches it.
-    if Items.stats.collectCalls == 0 and Items.stats.inventoryWrites > 0 then
-        v[#v + 1] = ("[INV5] %d inventory writes with no collect() call -- a loop is writing directly")
-            :format(Items.stats.inventoryWrites)
+    -- INV5 loop purity.
+    --
+    -- CORRECTED. This used to check "collectCalls == 0 and inventoryWrites > 0",
+    -- which is a TAUTOLOGY: inventoryWrites is only ever incremented a few lines
+    -- after collectCalls in the SAME function, so inventoryWrites > 0 already
+    -- implies collectCalls > 0 by construction. The check could never fire --
+    -- dead code standing in for a safety net. It also only ever guarded against
+    -- Items.lua's own internal counting, never against the actual risk: a FUTURE
+    -- system bypassing Items entirely and calling addItem directly.
+    --
+    -- A runtime counter cannot see a call it was never routed through, so the
+    -- real guarantee is now a STATIC check instead: tools/lua_check.py rule L7
+    -- greps every init/ file for ':addItem(' or ':createItem(' outside this
+    -- file. What is left for the runtime side is just sanity on the counters
+    -- themselves -- they are accumulate-only, so either going negative means
+    -- something reset or corrupted Items.stats directly rather than through the
+    -- API, which is itself worth flagging.
+    if Items.stats.collectCalls < 0 or Items.stats.inventoryWrites < 0 then
+        v[#v + 1] = ("[INV5] Items.stats corrupted: collectCalls=%s inventoryWrites=%s")
+            :format(tostring(Items.stats.collectCalls), tostring(Items.stats.inventoryWrites))
     end
 
     return v

@@ -32,6 +32,23 @@ RULES
       Reading lektor<T*> / .sections / std:: members hard-crashes the process,
       and pcall does NOT catch a native access violation.
 
+  L7  inventory write outside 08_items.lua
+      The engine law (#37): a gameplay loop must never write to a character's
+      inventory directly -- accumulate outside, transfer through Items.collect.
+      08_items.lua's own runtime invariant (INV5) can only see calls that were
+      ROUTED through it; a future system calling :addItem(/:createItem( directly
+      is invisible to a counter that never runs. This is the same violation as
+      a static check instead of a runtime one -- it catches the bypass a
+      counter structurally cannot.
+
+      Suppressible with an inline marker, same line or the line directly
+      above: `-- L7-ALLOW: <reason>`. Every exception must state why in the
+      diff, so the rule stays meaningful rather than quietly acquiring a
+      filename allowlist nobody re-reads. Two genuine exceptions exist today:
+      a Rule-4 fallback for when Items.lua itself fails to load, and a manual
+      probe that creates items to inspect their fields without ever granting
+      them (createItem with no matching addItem is not a grid write).
+
 Usage:
     python tools/lua_check.py                 # check all shipped scripts
     python tools/lua_check.py path/to/x.lua
@@ -40,6 +57,7 @@ from __future__ import annotations
 
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +68,9 @@ DESTRUCTIVE = ("removeItemAutoDestroy", "removeItemDontDestroy", "clearAll",
                "dropItem", "takeItem_EntireStack", "_DESTRUCTOR")
 CONTAINER_HINTS = (".sections", "platoonKillList", "getActivePlatoons",
                    "activeEffects", "whoSeesMeSneaking", "disguiseGUIFeedbacks")
+# The one file allowed to write to an inventory. Everything else must route
+# through Items.collect() -- this is the engine law (#37) as a filename check.
+ITEMS_MODULE = "08_items.lua"
 
 
 def check(path: Path):
@@ -116,6 +137,20 @@ def check(path: Path):
             if hint in l:
                 out.append((i, "L6", f"container-typed access '{hint}' -- HARD CRASH class, pcall cannot catch it"))
 
+        # --- L7: inventory write outside the Items module --------------------
+        if path.name != ITEMS_MODULE:
+            if re.search(r":\s*addItem\s*\(", l) or re.search(r":\s*createItem\s*\(", l):
+                # Look back up to 3 lines: the common idiom is
+                #     -- L7-ALLOW: reason
+                #     local ok, x = pcall(function()
+                #         return obj:createItem(...) end)
+                # which puts the marker two lines above the actual call.
+                window = lines[max(0, i - 4):i - 1]
+                allowed = "L7-ALLOW:" in l or any("L7-ALLOW:" in wl for wl in window)
+                if not allowed:
+                    out.append((i, "L7", "inventory write outside 08_items.lua -- "
+                                         "route through Items.bank/.collect instead (#37 engine law)"))
+
     # --- L5: handlers without a reload guard --------------------------------
     if "registerHandler(" in src:
         if "_generation" not in src and "unregisterHandler" not in src:
@@ -123,6 +158,68 @@ def check(path: Path):
             out.append((n, "L5", "registers a handler with NO reload/generation guard -- "
                                  "dofile will stack duplicate script copies"))
     return out
+
+
+def _selftest() -> int:
+    """python tools/lua_check.py --selftest -- exercise the rules against
+    synthetic snippets, so a change to the regex or the lookback window is
+    caught here rather than by re-reading real findings by eye. L7 earned this
+    the hard way: its first version's 1-line lookback silently failed to
+    recognise its own marker on the common `pcall(function() ... end)` idiom,
+    and the only reason that surfaced was a human noticing the count of
+    findings did not match expectation.
+    """
+    passed, failed = 0, 0
+
+    def case(name: str, filename: str, src: str, want_rule: str | None):
+        nonlocal passed, failed
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / filename
+            p.write_text(src, encoding="utf-8")
+            found = check(p)
+            rules = {r for _, r, _ in found}
+            ok = (want_rule in rules) if want_rule else (len(found) == 0)
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+                print(f"  FAIL: {name} -- wanted {want_rule!r}, got {sorted(rules)}")
+
+    # L1: use before file-level local declaration
+    case("L1 fires on use-before-declare", "x.lua",
+         "print(theValueHere)\nlocal theValueHere = 1\n", "L1")
+    case("L1 silent on ordinary code", "x.lua",
+         "local theValueHere = 1\nprint(theValueHere)\n", None)
+
+    # L2: banned engine internals
+    case("L2 fires on :process(", "x.lua", "factory:process()\n", "L2")
+
+    # L6: container-typed member access
+    case("L6 fires on a known container hint", "x.lua",
+         "print(faction.platoonKillList)\n", "L6")
+
+    # L7: the one that shipped a real bug (narrow lookback window)
+    case("L7 fires on a bare addItem outside items.lua", "x.lua",
+         "inv:addItem(item, 1, false, true)\n", "L7")
+    case("L7 fires on a bare createItem outside items.lua", "x.lua",
+         "factory:createItem(gd, hand, nil, nil, 0, nil)\n", "L7")
+    case("L7 silent inside 08_items.lua itself", "08_items.lua",
+         "inv:addItem(item, 1, false, true)\n", None)
+    case("L7 silent with a same-line marker", "x.lua",
+         "inv:addItem(item, 1, false, true)  -- L7-ALLOW: test\n", None)
+    case("L7 silent with marker 1 line above", "x.lua",
+         "-- L7-ALLOW: test\ninv:addItem(item, 1, false, true)\n", None)
+    case("L7 silent with marker through a pcall(function() wrapper (the real bug)",
+         "x.lua",
+         "-- L7-ALLOW: test\n"
+         "local ok, item = pcall(function()\n"
+         "    return factory:createItem(gd, hand, nil, nil, 0, nil) end)\n",
+         None)
+    case("L7 still fires past the lookback window", "x.lua",
+         "-- L7-ALLOW: test\n\n\n\ninv:addItem(item, 1, false, true)\n", "L7")
+
+    print(f"--- lua_check.py SELFTEST: {passed} passed, {failed} failed ---")
+    return 1 if failed else 0
 
 
 def rel(p: Path) -> str:
@@ -134,6 +231,9 @@ def rel(p: Path) -> str:
 
 
 def main() -> int:
+    if "--selftest" in sys.argv[1:]:
+        return _selftest()
+
     targets = [Path(a) for a in sys.argv[1:]] or sorted(DEFAULT.rglob("*.lua"))
     targets = [t for t in targets if "_disabled" not in str(t) and "probe_manifest" not in t.name]
 
