@@ -193,6 +193,46 @@ def _selftest() -> int:
 
     # L2: banned engine internals
     case("L2 fires on :process(", "x.lua", "factory:process()\n", "L2")
+    # NOTE: an ordinary call cannot use :createItem(/:addItem( here as the
+    # "nothing fires" example -- both unconditionally trip L7 (inventory
+    # write outside 08_items.lua) on any file that is not 08_items.lua, which
+    # would fail this case for the wrong reason. Exactly the cross-rule
+    # contamination mistake L7's own lookback bug already cost a debugging
+    # cycle for -- caught here before it shipped as a second copy of it.
+    case("L2 silent on an ordinary method call", "x.lua", "factory:getHandle()\n", None)
+
+    # L3: destructive inventory calls -- previously untested, same class of
+    # gap L7's own history warns about: a rule with no selftest coverage can
+    # silently break and nothing notices until a real finding goes missing.
+    case("L3 fires on removeItemAutoDestroy", "x.lua",
+         "inv:removeItemAutoDestroy(item)\n", "L3")
+    case("L3 fires on dropItem", "x.lua", "inv:dropItem(item)\n", "L3")
+    case("L3 silent on an unrelated call", "x.lua", "inv:getNumItems()\n", None)
+
+    # L4: fabricated out-of-domain arguments -- also previously untested.
+    case("L4 fires on a negative createItem level", "x.lua",
+         "factory:createItem(gd, hand, nil, nil, -1, nil)\n", "L4")
+    # filename is 08_items.lua here so this line does not ALSO trip L7 --
+    # isolates the L4-specific claim (level 0 is fine) from the unrelated
+    # inventory-write rule, same reasoning as the L2 case above.
+    case("L4 silent on a real level (0)", "08_items.lua",
+         "factory:createItem(gd, hand, nil, nil, 0, nil)\n", None)
+    case("L4 fires on a wide fabricated enum sweep", "x.lua",
+         "for cat = 0, 40 do\n  container:getDataByName(name, cat)\nend\n", "L4")
+    case("L4 silent on a loop over the measured categories only", "x.lua",
+         "for _, cat in ipairs({2,3,4}) do\n  container:getDataByName(name, cat)\nend\n", None)
+    case("L4 silent on a small 0-based loop (below the 40-ish threshold)", "x.lua",
+         "for cat = 0, 3 do\n  container:getDataByName(name, cat)\nend\n", None)
+
+    # L5: registerHandler with no reload/generation guard -- also previously
+    # untested.
+    case("L5 fires on registerHandler with no guard at all", "x.lua",
+         'registerHandler("onCharsUpdate", function() end)\n', "L5")
+    case("L5 silent when a generation guard is present", "x.lua",
+         'local MY_GEN = 1\n_generation = MY_GEN\nregisterHandler("onCharsUpdate", function() end)\n',
+         None)
+    case("L5 silent when unregisterHandler is present", "x.lua",
+         'registerHandler("onCharsUpdate", function() end)\nunregisterHandler(1)\n', None)
 
     # L6: container-typed member access
     case("L6 fires on a known container hint", "x.lua",
