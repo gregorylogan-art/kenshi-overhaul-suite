@@ -98,31 +98,15 @@ local CFG = {
     -- in vanilla streams items into a working character's pack, which is exactly
     -- what we were doing on a five-second loop.
     --
-    -- So the loop makes ZERO inventory writes. Catches accumulate in Lua state
-    -- and move across only when the player asks (Fishing.collect), as ONE
-    -- deliberate bounded action instead of an automatic one every five seconds.
-    -- If that stops the freeze, the engine law is real and every future system
-    -- -- cooking, trade, loot -- must follow the same shape.
+    -- So the loop makes ZERO inventory writes, unconditionally -- there is no
+    -- longer a flag for this, because there was never a live way to turn it
+    -- off (see the removal note above tryGrantItem, 2026-08-06). Catches
+    -- accumulate in Lua state and move across only when the player asks
+    -- (Fishing.collect), as ONE deliberate bounded action instead of an
+    -- automatic one every five seconds. This is confirmed to hold: Greg fished
+    -- 100+ items with zero freezes once the loop stopped touching the
+    -- inventory at all.
     -- ####################################################################
-    bankCatches = true,
-
-    -- STOP WELL BEFORE THE PACK IS FULL.
-    --
-    -- Greg, after four recurrences: "i 100% dont think its exp i think 100% its
-    -- inventory." The evidence agrees -- every symptom is inventory-shaped (the
-    -- inventory will not open, the stats screen that renders encumbrance dies,
-    -- the character stops responding), and it fires only at saturation.
-    --
-    -- If the inventory is the trigger, then OUR OWN hasRoomForItem probes on a
-    -- saturated grid are the thing poking it: we call it before every cast and
-    -- again before every grant. The 19:55 freeze happened on the exact cast that
-    -- first hit no-room, so even one probe against a full pack may be enough.
-    --
-    -- So do not walk up to the boundary at all. Count items instead -- a cheap
-    -- read that does not inspect the packing grid -- and stop after this many
-    -- catches on one load. The player empties, presses G, and the baseline
-    -- re-takes.
-    maxCatchesPerLoad = 6,
 
     -- Open Kenshi's own pack window when a catch is collected, so the fish are
     -- SEEN arriving rather than only logged. Kill switch: Fishing.setOpenPack(false).
@@ -396,7 +380,40 @@ function Fishing.tryCatch(character)
         end
         return false, nil, false   -- empty pool must NOT become a fish
     end
-    -- Resolve the best available fish once; falls back down the preference list.
+    -- WHAT you catch: FishTable (12_fishtable.lua), when it is loaded.
+    --
+    -- WIRED IN 2026-08-09. FishTable shipped fully built and selftested but
+    -- was never called from here -- the exact "sat inert for a whole session"
+    -- shape this function already warns about for the skill curve, above.
+    -- Behaviour is UNCHANGED today: with only Small Fish unlocked (tier 2+
+    -- entries still `pending`), FishTable.roll returns the same "Small Fish"
+    -- the static FISH_PREFERENCE list below already resolved to. The day
+    -- tier-2 FCS items exist, THIS is what starts dropping them -- no other
+    -- code change needed on either side of that FCS session.
+    --
+    -- night is hardcoded false: there is no verified day/night query yet
+    -- (#19 tracks it). region is FishTable.DEFAULT_REGION for the same reason.
+    -- Both degrade safely -- an unmeasured axis just does not gate anything.
+    if FishTable and FishTable.roll then
+        local st = Fishing.readWaterState(character)
+        local skill = (Fishing.readSkill and Fishing.readSkill(character, "labouring")) or 0
+        local okRoll, name = pcall(FishTable.roll, {
+            skill      = skill,
+            waterLevel = (type(st.waterLevel) == "number") and st.waterLevel or 1,
+            region     = FishTable.DEFAULT_REGION,
+            night      = false,
+        })
+        -- Ground truth beats the table: only return a name that actually
+        -- resolves to a real item. A pending/renamed entry falls through to
+        -- the static list below rather than losing the catch (#23 shape).
+        if okRoll and name and lookupItemData(character, name) then
+            return true, name, false
+        end
+    end
+
+    -- Fallback: resolve the best available fish once; falls back down the
+    -- preference list. Reached when FishTable is not loaded, or named
+    -- something that does not resolve.
     if not Fishing._fishName then
         for _, n in ipairs(FISH_PREFERENCE) do
             if lookupItemData(character, n) then
@@ -514,116 +531,34 @@ lookupItemData = function(character, itemId)
 end
 
 -- ---------------------------------------------------------------------------
--- PACK HEADROOM GATE  (issue #21)
+-- REMOVED (2026-08-06 red-team pass): the pack-headroom gate generation --
+-- HEADROOM_PROBE, Fishing.itemCount/.underCatchCap/.notePackFull/
+-- .packKnownFull/.hasPackHeadroom, and CFG.maxCatchesPerLoad.
+--
+-- All of it existed to answer one question -- "is the character's pack full?"
+-- -- for a loop that, at the time, minted directly into that pack every cast.
+-- Banking removed the question along with the loop: catches go into a Lua bag,
+-- so there is nothing in the character's inventory to be full OF, and every
+-- call site for this subsystem lived behind `if not CFG.bankCatches`, which
+-- has been `true` with no toggle since the migration. It could not run.
+--
+-- Left running, it was actively misleading: the G-press log printed
+-- "pack has nil items; stopping after 6 catches" -- a real line Greg saw --
+-- because Fishing.itemCount() queried the character's actual inventory (a live
+-- engine call, still paid for on every G-press) for a cap that no longer
+-- gated anything.
+--
+-- The history above (#21, #37, the Straw-Hat-vs-Book probe lesson, the 20:14
+-- mashing log) is preserved in docs/KENSHI-ENGINE-NOTES.md rather than dropped
+-- silently -- it is the reason banking exists at all, just no longer live code.
 -- ---------------------------------------------------------------------------
--- The observed failure, in Greg's words: "the inventory got full then the
--- character was unusable" -- no move orders, inventory refusing to open, stats
--- screen flashing shut, world running on normally.
---
--- The per-grant room check is NOT enough, and the log shows exactly why. Grant
--- 8 of 11 was correctly refused with hasRoomForItem=false, and then grants
--- 9, 10 and 11 SUCCEEDED -- because a 1x1 Small Fish still slots into gaps a
--- multi-cell item cannot use. So the pack kept accepting items right at its
--- boundary, and that boundary is where the character broke.
---
--- So stop fishing well BEFORE the boundary instead of walking up to it. The
--- probe is a multi-cell clothing item: once one of those will no longer fit,
--- the pack is effectively full even though 1x1 gaps remain, and we refuse the
--- cast outright rather than dribbling small items into the last crevices.
---
--- Deliberately fail-OPEN: if the probe cannot be resolved we allow the cast,
--- because tryGrantItem's own check is fail-CLOSED and nothing can be minted
--- without proving room there. Layered that way, an unknown degrades to "no
--- catch", never to "fishing is silently bricked".
--- PROBE ITEM CHOICE IS NOT ARBITRARY. This was "Straw Hat" and the gate never
--- fired once: the log shows eighteen consecutive grants refused with
--- hasRoomForItem=false while hasPackHeadroom() kept answering true, so auto
--- re-cast forever into a pack that could not take anything.
---
--- Straw Hat is category 3 (clothing/armour). Kenshi can place clothing in
--- EQUIPMENT slots rather than the backpack grid, so "is there room for a hat"
--- stays true long after the grid is solid. A clothing item is therefore the one
--- thing that must never be used to measure grid space.
---
--- Book is category 4 (general goods), multi-cell, and can only live in the grid.
-local HEADROOM_PROBE = "Book"
 
--- Item count, read WITHOUT inspecting the packing grid. Returns nil if the call
--- is unavailable, so callers can tell "empty" from "unknown".
-function Fishing.itemCount(character)
-    if not character then return nil end
-    local okInv, inv = pcall(function() return character:getInventory() end)
-    if not okInv or not inv or not inv.getNumItems then return nil end
-    local ok, n = pcall(function() return inv:getNumItems() end)
-    if ok and type(n) == "number" then return n end
-    return nil
-end
-
--- True while this character may keep fishing on the current load.
--- Deliberately count-based rather than hasRoomForItem-based: the whole point is
--- to stop BEFORE the grid saturates, so the probe that may itself be the trigger
--- is never run against a full pack.
-function Fishing.underCatchCap(s, character)
-    local n = Fishing.itemCount(character)
-    if not n then return true end          -- unknown -> do not block; the grant
-                                           -- path still refuses without room
-    if not s.baseItems then s.baseItems = n end
-    -- The player emptied the pack: re-baseline downward so fishing resumes.
-    if n < s.baseItems then s.baseItems = n end
-    return (n - s.baseItems) < CFG.maxCatchesPerLoad
-end
-
--- ---------------------------------------------------------------------------
--- NEVER PROBE A GRID WE ALREADY KNOW IS FULL
--- ---------------------------------------------------------------------------
--- The 20:14 log is the clearest evidence yet. Greg mashed G against a full pack
--- and got ~30 presses in 7 seconds, EACH ONE running hasRoomForItem against a
--- saturated grid, immediately before the character froze.
---
--- The catch cap did not save us because it was calibrated blind: it stopped
--- after 10 catches, but the pack SATURATES AT 15 ITEMS and he began with 9. It
--- never came close to firing, and every stop came from the hasRoomForItem
--- backstop -- i.e. from the very probe we were trying to avoid.
---
--- So remember the count at which this pack was observed full. While the pack is
--- at or above that count, refuse WITHOUT touching the grid; getNumItems() is a
--- plain count and is safe to call. When the player empties the pack the count
--- drops below the mark and probing resumes naturally.
---
--- Mashing G on a full pack now costs one cheap count per press and ZERO grid
--- probes, instead of one probe per press.
-function Fishing.notePackFull(s, character)
-    local n = Fishing.itemCount(character)
-    if n then s.fullAtCount = n end
-end
-
-function Fishing.packKnownFull(s, character)
-    if not s.fullAtCount then return false end
-    local n = Fishing.itemCount(character)
-    if not n then return false end          -- unknown -> fall through to the probe
-    -- MARGIN OF ONE. fullAtCount is a LEARNED CAPACITY for this pack, so stop one
-    -- item short of the count that was observed saturated. That way the next load
-    -- halts BEFORE reaching the state under suspicion, instead of rediscovering
-    -- it with another probe every time.
-    local limit = s.fullAtCount - 1
-    if n < limit then
-        s.fullAtCount = nil                 -- room was made; probe again
-        return false
-    end
-    return true
-end
-
-function Fishing.hasPackHeadroom(character)
-    if not character then return true end
-    local okInv, inv = pcall(function() return character:getInventory() end)
-    if not okInv or not inv or not inv.hasRoomForItem then return true end
-    local gd = lookupItemData(character, HEADROOM_PROBE)
-    if not gd then return true end
-    local ok, room = pcall(function() return inv:hasRoomForItem(gd) end)
-    if not ok then return true end
-    return room == true
-end
-
+-- SOLE REMAINING PURPOSE (2026-08-06 red-team pass): the Rule-4 fallback in
+-- Fishing.collect(), used only if 08_items.lua itself fails to load. Every
+-- other caller was migrated onto Items -- testGrant() now banks-then-collects
+-- through it instead of calling this directly, which is why lua_check.py's L7
+-- rule (no inventory writes outside 08_items.lua) needs an explicit exception
+-- here rather than 08_items.lua growing a second copy of this exact logic.
 local function tryGrantItem(character, itemId)
     -- LOG-AS-CURSOR. A hard freeze leaves no error, so print the intent BEFORE
     -- acting: whatever appears last in the log is what killed the game. This is
@@ -675,7 +610,7 @@ local function tryGrantItem(character, itemId)
     local item
     for _, lvl in ipairs({ 0, 1, 2 }) do
         local ok, made = pcall(function()
-            return factory:createItem(gd, hand, nil, nil, lvl, nil)
+            return factory:createItem(gd, hand, nil, nil, lvl, nil)  -- L7-ALLOW: Rule-4 fallback, see comment above tryGrantItem
         end)
         if ok and made then item = made break end
     end
@@ -718,7 +653,7 @@ local function tryGrantItem(character, itemId)
     -- addItem(item, quantity, dropOnFail, destroyOnFail). dropOnFail stays
     -- FALSE -- a fishing character stands in water, and asking the engine to
     -- place a world object there is its own hazard.
-    local okAdd, res = pcall(function() return inv:addItem(item, 1, false, true) end)
+    local okAdd, res = pcall(function() return inv:addItem(item, 1, false, true) end)  -- L7-ALLOW: Rule-4 fallback, see comment above tryGrantItem
     if okAdd and res then
         return true, ITEM_NAMES[itemId] or itemId
     end
@@ -748,14 +683,17 @@ end
 
 Fishing = Fishing or {}
 
--- Stat IDs MEASURED live via 18_stat_probe.lua (38 named stats enumerated).
--- These are read from the running game, not guessed.
-Fishing.STAT = {
-    labouring         = 3,
-    swimming          = 23,
-    perception        = 24,
-    precisionShooting = 36,
-}
+-- Stat IDs -- SOURCED FROM the shared Skills registry (09_skills.lua), not
+-- duplicated here a second time. 09_skills.lua's header says it exists because
+-- "each re-deriving 'read a stat, grant xp, curve an outcome' is how five
+-- subtly different versions appear and four are wrong" -- and this table WAS
+-- the second version: the same four ids, typed a second time, free to drift
+-- from Skills.registry if one ever gets corrected and the other forgotten.
+-- Built once at load (09_skills.lua loads before this file); read-only after.
+Fishing.STAT = {}
+for _, key in ipairs({ "labouring", "swimming", "perception", "precisionShooting" }) do
+    Fishing.STAT[key] = (Skills and Skills.idOf and Skills.idOf(key)) or nil
+end
 
 Fishing.SKILL_CFG = {
     -- base bands (must sum to 1 with fish as remainder)
@@ -789,20 +727,41 @@ Fishing.SKILL_CFG = {
 -- ---------------------------------------------------------------------------
 -- PURE MATH -- no game objects, so it is unit-testable from the console.
 -- ---------------------------------------------------------------------------
+-- DELEGATED to Skills.curve (09_skills.lua) when it is loaded -- same formula
+-- Skills.curve was generalised FROM (see the note above Fishing.STAT), so this
+-- is one implementation instead of two. Numerically identical to the old
+-- inline math: Skills.curve(base, per-skill rate, min) is exactly
+-- `math.max(min, base - sum(skill*rate))`. The inline fallback below is kept
+-- only so fishing still works if Skills failed to load, matching how every
+-- other module here degrades rather than hard-depending on a sibling.
 function Fishing.computeOdds(precision, swimming, labouring)
     local C = Fishing.SKILL_CFG
     precision = precision or 0
     swimming  = swimming  or 0
     labouring = labouring or 0
 
-    local junkCut = precision * C.junkPerPrecision
-                  + swimming  * C.junkPerSwimming
-                  + labouring * C.junkPerLabouring
-    local nothingCut = precision * C.nothingPerPrecision
+    local junk, nothing
+    if Skills and Skills.curve then
+        junk = Skills.curve(
+            { base = C.baseJunk, min = C.minJunk,
+              per = { precisionShooting = -C.junkPerPrecision,
+                      swimming          = -C.junkPerSwimming,
+                      labouring         = -C.junkPerLabouring } },
+            { precisionShooting = precision, swimming = swimming, labouring = labouring })
+        nothing = Skills.curve(
+            { base = C.baseNothing, min = C.minNothing,
+              per = { precisionShooting = -C.nothingPerPrecision } },
+            { precisionShooting = precision })
+    else
+        local junkCut = precision * C.junkPerPrecision
+                      + swimming  * C.junkPerSwimming
+                      + labouring * C.junkPerLabouring
+        local nothingCut = precision * C.nothingPerPrecision
+        junk    = math.max(C.minJunk,    C.baseJunk    - junkCut)
+        nothing = math.max(C.minNothing, C.baseNothing - nothingCut)
+    end
 
-    local junk    = math.max(C.minJunk,    C.baseJunk    - junkCut)
-    local nothing = math.max(C.minNothing, C.baseNothing - nothingCut)
-    local fish    = 1.0 - junk - nothing
+    local fish = 1.0 - junk - nothing
     if fish < 0 then fish = 0 end
     return nothing, junk, fish
 end
@@ -839,7 +798,12 @@ end
 -- ---------------------------------------------------------------------------
 -- LIVE READS / XP GRANTS -- only active once stat IDs are known.
 -- ---------------------------------------------------------------------------
+-- DELEGATED to Skills.read (09_skills.lua) when loaded -- identical logic
+-- (resolve id, getStat(id, true), 0 on any failure), so this used to be a
+-- second implementation of the same read. The inline fallback is the exact
+-- same code, kept only for the case Skills failed to load.
 function Fishing.readSkill(character, key)
+    if Skills and Skills.read then return Skills.read(character, key) end
     local id = Fishing.STAT[key]
     if not id then return 0 end
     local stats = select(2, pcall(function() return character:getStats() end))
@@ -1748,8 +1712,21 @@ function Fishing.testGrant(itemName)
     local ok, c = pcall(function() return getSelectedCharacter() end)
     if not ok or not c then log("testGrant: select a character first") return end
     itemName = itemName or "Straw Hat"
-    local granted, how = tryGrantItem(c, itemName)
-    log(("testGrant(%q) -> %s (%s)"):format(itemName, granted and "OK" or "FAILED", tostring(how)))
+
+    -- Routed through Items rather than calling tryGrantItem directly (removed
+    -- 2026-08-06 red-team pass). Bank one, then collect immediately -- this
+    -- exercises the EXACT SAME mint path (Items.collect -> mintInto) as a real
+    -- catch, so the test proves what actually ships rather than a parallel
+    -- reimplementation that could quietly drift from it.
+    local I = itemsOrNil()
+    if not I then log("testGrant: Items module not loaded") return false end
+    local ok2, cname = pcall(function() return c:getName() end)
+    cname = (ok2 and cname) or "?"
+    I.bank(cname, itemName, 1)
+    local moved, remaining, why = I.collect(c, cname)
+    local granted = moved > 0
+    log(("testGrant(%q) -> %s (%s)"):format(itemName, granted and "OK" or "FAILED",
+        tostring(granted and "collected" or why)))
     return granted
 end
 
@@ -1785,38 +1762,10 @@ local function beginCast(character, name)
         log(name .. ": cannot fish -- " .. why)
         return
     end
-    -- Pack fullness is checked BEFORE the 5-second cast, not after it, so the
-    -- refusal is immediate feedback rather than a wasted wait ending in nothing.
-    -- canFish stays purely about water state; this is a separate gate.
-    -- COUNT CAP FIRST. This is the gate that must fire, because it is the one
-    -- that keeps us away from a saturated grid entirely. hasRoomForItem stays
-    -- below it as a backstop, but by then we are already at the boundary that
-    -- is under suspicion for the freeze.
-    -- WHILE BANKING, SKIP EVERY INVENTORY GATE. The catch goes into a Lua table,
-    -- so there is nothing to have room for -- and the entire point is that the
-    -- loop performs no inventory calls whatsoever. Fullness is the collect
-    -- step's problem, once, when the player asks for it.
-    if not CFG.bankCatches then
-    -- CHEAP GATE FIRST, and it must not touch the grid. A player mashing G at a
-    -- full pack previously fired one hasRoomForItem per press.
-    if Fishing.packKnownFull(s, character) then
-        if not s.fullLogged then
-            s.fullLogged = true
-            log(name .. ": PACK FULL -- empty some items, then press G again")
-        end
-        return
-    end
-    s.fullLogged = nil
-    if not Fishing.underCatchCap(s, character) then
-        log(name .. ": PACK FULL (catch cap) -- empty the pack, then press G again")
-        return
-    end
-    if not Fishing.hasPackHeadroom(character) then
-        Fishing.notePackFull(s, character)   -- remember, so we never re-probe
-        log(name .. ": PACK FULL -- make space before fishing (issue #21 guard)")
-        return
-    end
-    end   -- if not CFG.bankCatches
+    -- No pack-fullness gate here: banking means the cast loop makes no
+    -- inventory call at all, so there is nothing to be full of. Fullness is
+    -- entirely Fishing.collect()'s concern, at the one moment the player asks
+    -- to move the catch into a real container.
     s.casting, s.elapsed = true, 0
     -- HOLD THE CASTER. The tick used to re-resolve the fisher through
     -- getSelectedCharacter() every frame and skip any cast whose name did not
@@ -1873,38 +1822,19 @@ local function finishCast(character, name)
         elseif not okXp then log(name .. ": xp ERROR " .. tostring(xp)) end
     end
 
-    -- BANKED PATH: no engine call at all. The catch is a number in a Lua table
-    -- until the player collects it. This is the whole point -- the fishing loop
-    -- must not touch the character's inventory.
-    if CFG.bankCatches then
-        -- Routed through the shared Items layer (08_items.lua) rather than a
-        -- private table. One implementation of the engine law means cooking,
-        -- trade and loot cannot each re-derive it and get it subtly wrong, and
-        -- Items.verify()'s conservation invariants now cover every catch.
-        local held = Fishing.bankItem(name, itemId)
-        log(("%s: CAUGHT %s%s | banked (%d in catch bag) | totals fish=%d junk=%d")
-            :format(name, itemId, isGarbage and " (junk)" or "",
-                    held, s.caught, s.garbage))
-        return
-    end
-
-    local granted, how = tryGrantItem(character, itemId)
-    log(("%s: CAUGHT %s%s | grant: %s (%s) | totals fish=%d junk=%d")
-        :format(name, itemId, isGarbage and " (junk)" or "",
-                granted and "OK" or "FAILED", how, s.caught, s.garbage))
-
-    -- GROUND TRUTH BEATS ANY PROBE. A predictive gate can be wrong -- the
-    -- Straw Hat probe was, and auto re-cast eighteen times into a pack that
-    -- refused every single item. A grant that ACTUALLY failed for lack of room
-    -- is not a prediction, it is the pack itself answering.
+    -- NO ENGINE CALL AT ALL. The catch is a number in a Lua table until the
+    -- player collects it -- this is the whole point of banking, and it is the
+    -- only path now; the pre-migration direct-mint branch was removed in the
+    -- 2026-08-06 red-team pass (see the note above tryGrantItem for why).
     --
-    -- Belt and braces on purpose: the headroom gate should stop us before we
-    -- ever get here, but when it does not, this cannot miss.
-    if not granted and type(how) == "string" and how:find("no room", 1, true) then
-        s.auto = false
-        Fishing.notePackFull(s, character)
-        log(name .. ": auto-fish STOPPED -- pack full (grant refused)")
-    end
+    -- Routed through the shared Items layer (08_items.lua) rather than a
+    -- private table. One implementation of the engine law means cooking, trade
+    -- and loot cannot each re-derive it and get it subtly wrong, and
+    -- Items.verify()'s conservation invariants now cover every catch.
+    local held = Fishing.bankItem(name, itemId)
+    log(("%s: CAUGHT %s%s | banked (%d in catch bag) | totals fish=%d junk=%d")
+        :format(name, itemId, isGarbage and " (junk)" or "",
+                held, s.caught, s.garbage))
 end
 
 -- AUTO-FISH re-arm. Kenshi's idiom is "give the order once and walk away", not
@@ -1927,24 +1857,8 @@ local function rearmIfAuto(character, name)
         log(name .. ": auto-fish STOPPED -- " .. why)
         return
     end
-    if not CFG.bankCatches then
-    if Fishing.packKnownFull(s, character) then
-        s.auto = false
-        log(name .. ": auto-fish STOPPED -- pack full")
-        return
-    end
-    if not Fishing.underCatchCap(s, character) then
-        s.auto = false
-        log(name .. ": auto-fish STOPPED -- catch cap reached (pack not saturated)")
-        return
-    end
-    if not Fishing.hasPackHeadroom(character) then
-        Fishing.notePackFull(s, character)
-        s.auto = false
-        log(name .. ": auto-fish STOPPED -- pack full")
-        return
-    end
-    end   -- if not CFG.bankCatches
+    -- No pack-fullness check here either, for the same reason as beginCast:
+    -- banking means there is nothing to be full of until collect() runs.
     beginCast(character, name)
 end
 
@@ -2090,12 +2004,8 @@ if type(registerHandler) == "function" then
         end
 
         s.auto = true
-        -- RE-BASELINE the catch cap on every manual start. Pressing G is the
-        -- player saying "go again", which is exactly when they have just made
-        -- room. Without this, one full pack would disable fishing permanently.
-        s.baseItems = (not CFG.bankCatches) and Fishing.itemCount(character) or nil
-        log(("%s: auto-fish ON  (pack has %s items; stopping after %d catches)")
-            :format(name, tostring(s.baseItems), CFG.maxCatchesPerLoad))
+        local _, bagCount = Fishing.bagFor(name)
+        log(("%s: auto-fish ON  (%d already banked)"):format(name, bagCount))
         beginCast(character, name)
         -- beginCast refuses on dry land or a full pack and says why. Do not
         -- leave auto armed after a refusal, or the character would silently

@@ -26,6 +26,28 @@
 --   2. WATERMARK ADVANCED OUTSIDE THE READY GATE. Never mark work processed
 --      when it did not actually run. WSM.catchUp only advances the watermark
 --      for days whose handler genuinely executed.
+--
+-- v0.2 (2026-08-08) -- read StarFall's real WorldStateManager.h (~1400 lines:
+-- hot mirrors, settlement aggregates, witness rings, batch mutation scopes) to
+-- see what a WSM looks like at 2000+ NPCs. Almost none of it belongs here --
+-- this WSM has six flat categories and no per-entity registry yet, so porting
+-- SoA hot-mirrors would be solving a problem we do not have. Four ideas DID
+-- scale down cleanly and are new in this version:
+--   * WSM.verify()        -- the same numbered-invariant-contract shape Items/
+--                             Economy/Storage already use in this repo, applied
+--                             to the WSM itself (StarFall's VerifyWorldStateInvariants).
+--   * WSM.queryHistory()  -- filter EventHistory by category/source/day, so a
+--                             batch-test session answers "what actually wrote
+--                             economy today" without grepping raw prints
+--                             (StarFall's QueryWhy, minus the entity-id/ring
+--                             machinery we have no use for yet).
+--   * WSM.batchOf()       -- the GUID%N batching this file's header has PROMISED
+--                             since v0.1 and never delivered. Pure, tested, ready
+--                             for whichever town/NPC system needs it first.
+--   * WSM.stats           -- reentrancy-refusal and mutate-failure counters, so
+--                             a soak session ends with a number to report instead
+--                             of a log to re-read (Greg: "if it crashes even
+--                             better, more information").
 -- ============================================================================
 
 local TAG = "[WSM] "
@@ -112,6 +134,14 @@ end
 
 WSM.state = WSM.state or freshState()
 
+-- Session counters, not saved. Cheap to bump, cheap to read after a soak --
+-- the point is a number to report, not a log to re-read.
+WSM.stats = WSM.stats or { mutateOk = 0, mutateFailed = 0, reentrantRefused = 0, unknownCategoryRefused = 0 }
+
+-- [category] = { source, day, hour } for the most recent SUCCESSFUL mutate.
+-- Cheap "who touched this last" without walking history.
+WSM.lastMutateBy = WSM.lastMutateBy or {}
+
 -- ---------------------------------------------------------------------------
 -- HISTORY -- rolling window, trimmed by GAME DAY not row count, so a quiet
 -- stretch cannot evict recent rows and a busy day cannot blow memory.
@@ -164,12 +194,14 @@ end
 function WSM.mutate(category, fn, source)
     if not CATEGORIES[category] then
         log("mutate: unknown category " .. tostring(category))
+        WSM.stats.unknownCategoryRefused = WSM.stats.unknownCategoryRefused + 1
         return false
     end
     if inMutate then
         -- Re-entrant mutation is how you get half-applied state and infinite
         -- loops. Refuse loudly rather than corrupt quietly.
         log("mutate: RE-ENTRANT write refused (" .. category .. " from " .. tostring(source) .. ")")
+        WSM.stats.reentrantRefused = WSM.stats.reentrantRefused + 1
         return false
     end
 
@@ -179,8 +211,10 @@ function WSM.mutate(category, fn, source)
 
     if not ok then
         log(("mutate %s FAILED (%s): %s"):format(category, tostring(source), tostring(err)))
+        WSM.stats.mutateFailed = WSM.stats.mutateFailed + 1
         return false
     end
+    WSM.stats.mutateOk = WSM.stats.mutateOk + 1
 
     WSM.history[#WSM.history + 1] = {
         day      = WSM.state.time.day,
@@ -189,6 +223,8 @@ function WSM.mutate(category, fn, source)
         source   = source or "?",
     }
     trimHistory()
+
+    WSM.lastMutateBy[category] = { source = source or "?", day = WSM.state.time.day, hour = WSM.state.time.hour }
 
     pendingDirty[category] = true
     flushDirty()
@@ -287,7 +323,116 @@ end
 
 function WSM.reset()
     WSM.state, WSM.history, WSM.watermarks = freshState(), {}, {}
+    WSM.stats = { mutateOk = 0, mutateFailed = 0, reentrantRefused = 0, unknownCategoryRefused = 0 }
+    WSM.lastMutateBy = {}
     log("state reset")
+end
+
+-- ---------------------------------------------------------------------------
+-- BATCH -- GUID%N-shaped batching. Promised in this file's header since v0.1
+-- ("cherry-picked ... GUID%N batching") and never delivered because nothing
+-- in this WSM iterates enough entities yet to need it. Pure and tested now,
+-- ahead of the town/NPC registry that will actually call it (#28, #33), so
+-- that system does not have to invent its own hashing on day one.
+--
+-- `key` is whatever stable identifier the caller has -- a Kenshi character
+-- name today, a GUID/handle later. Lua has no native GUID type here, so this
+-- hashes the string deterministically (same key -> same batch, always) rather
+-- than assuming a numeric id.
+-- ---------------------------------------------------------------------------
+WSM.BATCH_COUNT = 4
+
+function WSM.batchOf(key, n)
+    n = n or WSM.BATCH_COUNT
+    if type(n) ~= "number" or n <= 0 then return 0 end
+    local s = tostring(key)
+    local h = 5381
+    for i = 1, #s do
+        h = (h * 33 + s:byte(i)) % 2147483647
+    end
+    return h % math.floor(n)
+end
+
+-- ---------------------------------------------------------------------------
+-- QUERY -- filtered read over EventHistory. StarFall's QueryWhy answers "why
+-- did this change" over a much bigger event surface (entity ids, an audit
+-- ring); this is the slim slice that actually matters here: "what wrote
+-- category X, from source Y, since day Z" -- the question a batch-test session
+-- asks after the fact, instead of grepping raw [WSM] prints for a mutate line.
+--
+-- filter = { category=?, source=?, sinceDay=? }  -- all optional, AND'd together
+-- ---------------------------------------------------------------------------
+function WSM.queryHistory(filter)
+    filter = filter or {}
+    local out = {}
+    for _, row in ipairs(WSM.history) do
+        local ok = true
+        if filter.category and row.category ~= filter.category then ok = false end
+        if ok and filter.source and row.source ~= filter.source then ok = false end
+        if ok and filter.sinceDay and row.day < filter.sinceDay then ok = false end
+        if ok then out[#out + 1] = row end
+    end
+    return out
+end
+
+-- ============================================================================
+-- WSM INVARIANT CONTRACT -- executable via WSM.verify(). Same numbered shape
+-- Items/Economy/Storage already use in this repo (cherry-picked one level up
+-- from StarFall's VerifyWorldStateInvariants, #3637): the rules are CHECKED,
+-- not just documented in this header where they can rot unnoticed.
+--   1. History bound: every history row's day falls within kos.wsm.historyDays
+--      of the current day -- trimHistory's job, checked rather than assumed.
+--   2. Known categories only: every history row names a live CATEGORIES key.
+--   3. Watermark sanity: no catch-up watermark sits in the future relative to
+--      the current day (a watermark ahead of "now" can only mean corrupted
+--      state, never legitimate progress).
+--   4. Schema integrity: WSM.state has exactly the CATEGORIES keys -- nothing
+--      missing, nothing orphaned by a stale snapshot from an older version.
+--   5. Rest state: verify() must never observe bInMutate held true -- that
+--      would mean a mutate crashed without unwinding the flag.
+-- ============================================================================
+function WSM.verify()
+    local v = {}
+    local today = WSM.state.time.day
+    local keepDays = WSM.cvar["kos.wsm.historyDays"] or 30
+
+    for i, row in ipairs(WSM.history) do
+        -- INV1 history bound
+        if row.day < today - keepDays then
+            v[#v + 1] = ("[INV1] history row %d (day %d) outside the %d-day window (today=%d)")
+                :format(i, row.day, keepDays, today)
+        end
+        -- INV2 known categories only
+        if not CATEGORIES[row.category] then
+            v[#v + 1] = ("[INV2] history row %d names unknown category %s"):format(i, tostring(row.category))
+        end
+    end
+
+    -- INV3 watermark sanity
+    for key, day in pairs(WSM.watermarks or {}) do
+        if day > today then
+            v[#v + 1] = ("[INV3] watermark[%s]=%d is AHEAD of today (%d)"):format(key, day, today)
+        end
+    end
+
+    -- INV4 schema integrity: exact key-set match, both directions
+    for category in pairs(CATEGORIES) do
+        if WSM.state[category] == nil then
+            v[#v + 1] = ("[INV4] state missing category %s"):format(category)
+        end
+    end
+    for category in pairs(WSM.state) do
+        if not CATEGORIES[category] then
+            v[#v + 1] = ("[INV4] state has orphan category %s (not in CATEGORIES)"):format(category)
+        end
+    end
+
+    -- INV5 rest state
+    if inMutate then
+        v[#v + 1] = "[INV5] verify() called while bInMutate is still true -- a mutate did not unwind"
+    end
+
+    return v
 end
 
 -- ---------------------------------------------------------------------------
@@ -295,11 +440,36 @@ end
 -- from the console instantly (the same trick that made the fishing curve
 -- testable without grinding XP).
 -- ---------------------------------------------------------------------------
+local function countOf(t)
+    local n = 0
+    for _ in pairs(t) do n = n + 1 end
+    return n
+end
+
+-- Generic per-category manifest -- StarFall's DescribeCategories, scaled down.
+-- Lua tables are already self-describing, so this just standardizes "how big
+-- is each category" instead of hand-picking two (npcs, settlements) and
+-- leaving the rest invisible to WSM.dump().
+function WSM.describe()
+    local out = {}
+    for category in pairs(CATEGORIES) do
+        local v = WSM.state[category]
+        out[category] = (type(v) == "table") and countOf(v) or 1
+    end
+    return out
+end
+
 function WSM.dump()
-    log(("day=%d  history=%d rows  npcs=%d  settlements=%d")
+    local d = WSM.describe()
+    local parts = {}
+    for category in pairs(CATEGORIES) do
+        parts[#parts + 1] = category .. "=" .. tostring(d[category])
+    end
+    table.sort(parts)
+    log(("day=%d  history=%d rows  stats(ok=%d fail=%d reentrant=%d)  %s")
         :format(WSM.state.time.day, #WSM.history,
-                (function() local n = 0 for _ in pairs(WSM.state.npcs) do n = n + 1 end return n end)(),
-                (function() local n = 0 for _ in pairs(WSM.state.settlements) do n = n + 1 end return n end)()))
+                WSM.stats.mutateOk, WSM.stats.mutateFailed, WSM.stats.reentrantRefused,
+                table.concat(parts, "  ")))
 end
 
 function WSM.selftest()
@@ -346,10 +516,62 @@ function WSM.selftest()
     WSM.applySnapshot(snap)
     check("snapshot restored", WSM.get("player").notoriety == 5)
 
+    -- v0.2: verify() must be clean on a freshly reset WSM
+    WSM.reset()
+    check("verify clean on fresh state", #WSM.verify() == 0)
+
+    -- v0.2: invariant contract actually catches breaks, not just documents them
+    WSM.watermarks = { future = 999 }
+    local viol = WSM.verify()
+    local sawFutureWatermark = false
+    for _, m in ipairs(viol) do if m:find("INV3") then sawFutureWatermark = true end end
+    check("verify catches a future watermark", sawFutureWatermark)
+    WSM.watermarks = {}
+
+    -- v0.2: stats actually count what happened
+    local before = WSM.stats.mutateOk
+    WSM.mutate("player", function(p) p.notoriety = 1 end, "test")
+    check("stats.mutateOk incremented", WSM.stats.mutateOk == before + 1)
+    local reentBefore = WSM.stats.reentrantRefused
+    WSM.mutate("economy", function() WSM.mutate("player", function() end, "inner2") end, "outer2")
+    check("stats.reentrantRefused incremented", WSM.stats.reentrantRefused == reentBefore + 1)
+    check("lastMutateBy recorded the source", WSM.lastMutateBy.player.source == "test")
+
+    -- v0.2: queryHistory filters correctly
+    WSM.reset()
+    WSM.mutate("player", function(p) p.notoriety = 1 end, "sourceA")
+    WSM.mutate("economy", function() end, "sourceB")
+    WSM.mutate("player", function(p) p.notoriety = 2 end, "sourceA")
+    check("queryHistory filters by category", #WSM.queryHistory({ category = "economy" }) == 1)
+    check("queryHistory filters by source", #WSM.queryHistory({ source = "sourceA" }) == 2)
+    check("queryHistory unfiltered returns everything", #WSM.queryHistory({}) == 3)
+    check("queryHistory sinceDay excludes nothing on day 0", #WSM.queryHistory({ sinceDay = 0 }) == 3)
+
+    -- v0.2: batchOf is deterministic, bounded, and spreads keys
+    check("batchOf is deterministic", WSM.batchOf("Fisher Bob", 4) == WSM.batchOf("Fisher Bob", 4))
+    check("batchOf stays in range", WSM.batchOf("Fisher Bob", 4) >= 0 and WSM.batchOf("Fisher Bob", 4) < 4)
+    check("batchOf(n=1) is always 0", WSM.batchOf("anyone", 1) == 0)
+    do
+        local seen = {}
+        for i = 1, 40 do seen[WSM.batchOf("npc" .. i, 4)] = true end
+        check("batchOf spreads 40 keys across more than one bucket", countOf(seen) > 1)
+    end
+
+    -- v0.2: describe() reports every category, not just the two dump() used to
+    do
+        local d = WSM.describe()
+        local allPresent = true
+        for category in pairs({ time = true, economy = true, settlements = true,
+                                 npcs = true, player = true, events = true }) do
+            if d[category] == nil then allPresent = false end
+        end
+        check("describe covers every category", allPresent)
+    end
+
     WSM.reset()
     log(("--- SELFTEST: %d passed, %d failed ---"):format(pass, fail))
     return fail == 0
 end
 
-log("WSM v0.1 ready. Try:  WSM.selftest()   WSM.dump()")
+log("WSM v0.2 ready. Try:  WSM.selftest()   WSM.dump()   WSM.verify()   WSM.queryHistory({})")
 log("=== 05_wsm.lua END ===")
