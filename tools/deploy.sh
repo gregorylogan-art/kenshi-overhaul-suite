@@ -84,12 +84,12 @@ if [[ -f "$REPO/tools/luarun.py" && -n "$PY" ]]; then
 
   echo "--- regression tests ---"
   if ! "$PY" "$REPO/tools/luarun.py" --tests \
-        --modules "05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,12_fishtable.lua,16_storage.lua,18_economy.lua,24_cooking.lua" 2>&1 \
+        --modules "05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,12_fishtable.lua,16_storage.lua,18_economy.lua,20_town_economy.lua,24_cooking.lua" 2>&1 \
         | grep -iE "passed, [0-9]+ failed|FAILED|error|expected"; then
     echo "  (no test output)"
   fi
   if ! "$PY" "$REPO/tools/luarun.py" --tests \
-        --modules "05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,12_fishtable.lua,16_storage.lua,18_economy.lua,24_cooking.lua" >/dev/null 2>&1; then
+        --modules "05_wsm.lua,08_items.lua,09_skills.lua,10_fishing.lua,12_fishtable.lua,16_storage.lua,18_economy.lua,20_town_economy.lua,24_cooking.lua" >/dev/null 2>&1; then
     if [[ "$FORCE" != "--force" ]]; then
       echo "REFUSING TO DEPLOY -- regression tests failed." >&2
       exit 4
