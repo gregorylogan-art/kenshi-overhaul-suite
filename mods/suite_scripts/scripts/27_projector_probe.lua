@@ -29,9 +29,14 @@
 --
 -- FOUR PHASES, RISK-ORDERED (the 01_capability_probe.lua discipline):
 --   0. OBSERVE. Register the three notification hooks and log every job/order
---      the game's OWN AI assigns to ANY character. No calls, no risk -- this
---      cannot crash anything, because it never calls into the engine, only
---      reacts to what the engine already decided to do.
+--      the game's OWN AI assigns to ANY character. No calls of our own, so it
+--      cannot FAULT anything -- but a combat burst (several characters
+--      getting addJob/addOrder in the same moment) can still generate enough
+--      synchronous log writes to hang the game, found live 2026-08-10 (no
+--      new native crash dump afterward -- a hang, not a fault). Rate-limited
+--      the same way 28_vanilla_observer.lua's equip/unequip storm was fixed:
+--      full detail for the first few firings per event, a count line every
+--      50 after that. Projector.counts() gives the running tally regardless.
 --   1. READ-ONLY. getPermajobCount()/getPermajob() on the selected character.
 --      Zero-arg or int-slot getters only -- no more risk than any other
 --      verified getter already in daily use.
@@ -123,6 +128,37 @@ local function taskLabel(taskId)
     return tostring(taskId)
 end
 
+-- RATE LIMITING. FOUND LIVE 2026-08-10: 28_vanilla_observer.lua's
+-- onCharacterEquip/Unequip firing 1510 times in a burst was fixed with
+-- exactly this pattern, but the fix was never ported HERE -- a combat burst
+-- (multiple characters getting addJob/addOrder in rapid succession as a
+-- fight breaks out) produced no new native crash dump afterward, meaning it
+-- was very likely a HANG from log-write volume rather than a fault, the
+-- same mechanism, just in the sibling file. Same shape as Observer's fix:
+-- full detail for the first few firings per event, then a periodic count.
+local PROBE_LOG_SAMPLE = 3
+local PROBE_LOG_EVERY  = 50
+local probeEventCounts = {}
+
+function Projector.counts()
+    local keys = {}
+    for k in pairs(probeEventCounts) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for _, k in ipairs(keys) do log(("%-14s %d"):format(k, probeEventCounts[k])) end
+end
+
+local function rateLimited(key, fullLine)
+    local n = (probeEventCounts[key] or 0) + 1
+    probeEventCounts[key] = n
+    if n <= PROBE_LOG_SAMPLE then
+        log(fullLine())
+    elseif n % PROBE_LOG_EVERY == 0 then
+        log(("%s fired %d times so far (full detail for the first %d, a count "
+             .. "line every %d after that -- Projector.counts() for the running tally)")
+            :format(key, n, PROBE_LOG_SAMPLE, PROBE_LOG_EVERY))
+    end
+end
+
 function Projector.startObserve()
     -- NOT `not type(x) == "function"` -- `not` binds tighter than `==` in
     -- Lua, so that parses as `(not type(x)) == "function"`, which is always
@@ -145,15 +181,21 @@ function Projector.startObserve()
     end
 
     local h1 = registerHandler("onCharacterAddJob", function(character, taskType, subject, shift, addDontClear, location)
-        log(("OBSERVED addJob: %s <- task %s  shift=%s addDontClear=%s")
-            :format(nameOf(character), taskLabel(taskType), tostring(shift), tostring(addDontClear)))
+        rateLimited("addJob", function()
+            return ("OBSERVED addJob: %s <- task %s  shift=%s addDontClear=%s")
+                :format(nameOf(character), taskLabel(taskType), tostring(shift), tostring(addDontClear))
+        end)
     end)
     local h2 = registerHandler("onCharacterAddOrder", function(character, destBuilding, taskType, subject, shift, clear, location)
-        log(("OBSERVED addOrder: %s <- task %s  shift=%s clear=%s")
-            :format(nameOf(character), taskLabel(taskType), tostring(shift), tostring(clear)))
+        rateLimited("addOrder", function()
+            return ("OBSERVED addOrder: %s <- task %s  shift=%s clear=%s")
+                :format(nameOf(character), taskLabel(taskType), tostring(shift), tostring(clear))
+        end)
     end)
     local h3 = registerHandler("onCharacterRemoveJob", function(character, taskType)
-        log(("OBSERVED removeJob: %s -x- task %s"):format(nameOf(character), taskLabel(taskType)))
+        rateLimited("removeJob", function()
+            return ("OBSERVED removeJob: %s -x- task %s"):format(nameOf(character), taskLabel(taskType))
+        end)
     end)
     for _, h in ipairs({ h1, h2, h3 }) do
         if h then Projector._handlers[#Projector._handlers + 1] = h end
