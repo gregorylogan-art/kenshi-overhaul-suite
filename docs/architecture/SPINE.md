@@ -219,6 +219,38 @@ value" — they are real methods that need an argument the zero-arg safe
 sweep never supplied, and the doc's `` (empty) argument column for them is
 therefore ALSO wrong, same failure class as addJob, just lower stakes.
 
+## VERIFIED live 2026-08-10: equipment slot names + another arg-order bug
+
+First real payload from `28_vanilla_observer.lua`'s bulk-scrape session (LIFE
+tag, ~4 real minutes at 20x game speed near a slave camp — game speed
+multiplies event volume proportionally, so treat the counts below as ~80
+game-minutes of ordinary NPC equip/unequip churn, not an anomaly. Directly
+useful for #43 skeleton gear and #44 belt-slot drones):
+
+**Confirmed real equipment slot names** (`onCharacterEquip`/`onCharacterUnequip`'s
+slotName argument, 1510 firings observed): `legs`, `back`, `armour`, `shirt`,
+`head`, `boots`, `hip`, `hands`, `main`. No longer a guess for #43/#44 — these
+are the actual strings the engine uses.
+
+**Another doc-vs-reality argument-order bug**, same failure class as addJob:
+`CallbacksReference.md` documents `onCharacterEquip`/`onCharacterUnequip` as
+`function(character, item, slotName)`. The observed live data is unambiguous
+that the real order is **`(character, slotName, item)`** — every observed
+line showed a short lowercase slot string in position 2 and a
+`KenshiLua.Item object` in position 3, never the reverse, across 1510
+samples. Treat `CallbacksReference.md`'s argument ORDER columns with the same
+skepticism `BindingsReference.md`'s already earned — the events themselves
+are real (that part has held up every time it's been checked), the
+documented argument order is what keeps being wrong.
+
+**Operational note for future bulk-scrape sessions:** run a new tag group at
+1x game speed first. High-frequency events (equip/unequip here) can generate
+enough synchronous log-file writes in a tight burst to plausibly cause an
+input hitch (an M-key press not registering was observed in the same
+session) — not a crash, but real overhead. `28_vanilla_observer.lua` now
+rate-limits after the first 3 occurrences of each event to a periodic count
+line; `Observer.counts()` gives the full tally regardless.
+
 ## Danger list — never call these
 
 | Pattern | Why |

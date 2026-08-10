@@ -40,8 +40,12 @@
 --                                   it happens
 --     Observer.startOne(name)   -> register exactly ONE event, for bisecting
 --                                   a crash without risking the rest
+--     Observer.startTag(tag)    -> register only one tag group's events
 --     Observer.stop()           -> unregisters all of them
 --     Observer.list()           -> prints what is being watched, by tag
+--     Observer.counts()         -> the full per-event tally, INCLUDING events
+--                                   that stopped printing individually once
+--                                   rate-limiting kicked in (see below)
 --
 --   dofile("mods/KenshiLua/scripts/28_vanilla_observer.lua")
 --   Observer.start()
@@ -78,6 +82,55 @@ local function describeArgs(...)
         parts[#parts + 1] = ok and s or "<unprintable>"
     end
     return table.concat(parts, ", ")
+end
+
+-- ---------------------------------------------------------------------------
+-- RATE LIMITING. FOUND LIVE 2026-08-10: a single LIFE-tag session (~4 real
+-- minutes) fired onCharacterEquip/onCharacterUnequip 1510 times combined,
+-- with several firings landing in the SAME millisecond -- almost certainly
+-- a bulk gear-strip (a slave camp scene, or similar) rather than one
+-- character redressing. That is 1510 synchronous print()-to-log-file calls
+-- in a tight burst, and an unrelated-looking symptom showed up in the same
+-- session (M key not responding for the map, had to click instead) that a
+-- write-storm stalling the main thread is a very plausible explanation for
+-- -- not proven, but plausible enough that "log every single firing" is
+-- worth fixing regardless of whether it was the actual cause.
+--
+-- So: log the first few occurrences of each event in full (enough to see
+-- real argument shapes and values -- this is exactly how the equip/unequip
+-- slot names below were discovered), then drop to a periodic count-only
+-- line. The full per-event tally is still available afterward via
+-- Observer.counts() even for events that stopped printing individually.
+-- ---------------------------------------------------------------------------
+local EVENT_LOG_SAMPLE = 3     -- log this many occurrences in full detail
+local EVENT_LOG_EVERY  = 50    -- then a count-only line every N after that
+
+local eventCounts = {}   -- ["tag:event"] = count, session-transient
+
+function Observer.counts()
+    local keys = {}
+    for k in pairs(eventCounts) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for _, k in ipairs(keys) do log(("%-30s %d"):format(k, eventCounts[k])) end
+end
+
+-- Shared by start()/startOne()/startTag() so the rate-limit logic exists
+-- exactly once, not once per registration path.
+local function makeObserverHandler(e)
+    local key = e.tag .. ":" .. e.event
+    return function(...)
+        local n = (eventCounts[key] or 0) + 1
+        eventCounts[key] = n
+        if n <= EVENT_LOG_SAMPLE then
+            log(("[%s] %s(%s)"):format(e.tag, e.event, describeArgs(...)))
+        elseif n % EVENT_LOG_EVERY == 0 then
+            log(("[%s] %s fired %d times so far (full detail for the first %d, "
+                 .. "a count line every %d after that -- Observer.counts() for the running tally)")
+                :format(e.tag, e.event, n, EVENT_LOG_SAMPLE, EVENT_LOG_EVERY))
+        end
+        -- NO return statement -- see the file header. This is the entire
+        -- safety contract for every OVERRIDE-category event in the list.
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -204,12 +257,7 @@ function Observer.start()
             -- this crashes, the last "REGISTERING" line with no matching
             -- "registered ->" line right after it names the killer.
             log("REGISTERING: " .. e.event)
-            local ok, hid = pcall(registerHandler, e.event, function(...)
-                log(("[%s] %s(%s)"):format(e.tag, e.event, describeArgs(...)))
-                -- NO return statement -- see the file header. This line is
-                -- the entire safety contract for every OVERRIDE-category
-                -- event above.
-            end)
+            local ok, hid = pcall(registerHandler, e.event, makeObserverHandler(e))
             if ok and hid then
                 log("  registered -> ok")
                 Observer._handlers[#Observer._handlers + 1] = hid
@@ -240,9 +288,7 @@ function Observer.startOne(eventName)
     local tag = "?"
     for _, e in ipairs(EVENTS) do if e.event == eventName then tag = e.tag end end
     log("REGISTERING (solo): " .. eventName)
-    local ok, hid = pcall(registerHandler, eventName, function(...)
-        log(("[%s] %s(%s)"):format(tag, eventName, describeArgs(...)))
-    end)
+    local ok, hid = pcall(registerHandler, eventName, makeObserverHandler({ event = eventName, tag = tag }))
     log(ok and ("  registered -> ok (handle " .. tostring(hid) .. ")")
              or ("  FAILED -- " .. tostring(hid)))
 end
@@ -263,9 +309,7 @@ function Observer.startTag(wantTag)
     for _, e in ipairs(EVENTS) do
         if e.tag == wantTag and not quarantined(e.event) then
             log("REGISTERING: " .. e.event)
-            local ok, hid = pcall(registerHandler, e.event, function(...)
-                log(("[%s] %s(%s)"):format(e.tag, e.event, describeArgs(...)))
-            end)
+            local ok, hid = pcall(registerHandler, e.event, makeObserverHandler(e))
             if ok and hid then
                 log("  registered -> ok")
                 Observer._handlers[#Observer._handlers + 1] = hid
@@ -299,5 +343,8 @@ function Observer.list()
     end
 end
 
-log("28_vanilla_observer loaded -- Observer.start() / .stop() / .list()")
+log("28_vanilla_observer loaded -- Observer.start() / .stop() / .list() / .counts()")
 log(("watching %d events across JOBS/SLAVE/SHADOW/TAVERN/ECON/BUILD/LIFE/SKILL"):format(#EVENTS))
+log("TIP: game speed multiplies event volume proportionally -- 20x speed compressed")
+log("~80 real minutes of NPC activity into ~4 (1510 equip/unequip firings). Prefer 1x")
+log("speed for a new tag group's first run, at least until it has proven quiet.")
