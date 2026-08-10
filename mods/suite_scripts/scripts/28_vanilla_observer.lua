@@ -167,7 +167,17 @@ local EVENTS = {
 -- logging the event name BEFORE each individual registerHandler call --
 -- log-as-cursor, applied to REGISTRATION, not just to firing a callback.
 local QUARANTINE = {
-    -- "eventName", -- add here once identified from a crash log
+    -- FOUND LIVE 2026-08-10 (second incident): all 38 registered cleanly
+    -- while paused (no crash -- disproves the "registration itself crashes"
+    -- theory for this incident). Crashed on RESUMING play. Log ends on 6
+    -- back-to-back `onCharacterEat(Character, nil, Inventory)` firings, no
+    -- Lua error printed before the cutoff -- foodItem was nil every time
+    -- observed. NOT PROVEN: could be this hook choking on a real (non-nil)
+    -- item reference the moment one actually came through, or could be an
+    -- unrelated vanilla Kenshi crash (dense NPC areas are known crash-prone)
+    -- that happened to land while this was running. Quarantined as the best
+    -- available suspect rather than left live on an unproven guess either way.
+    "onCharacterEat",
 }
 local function quarantined(name)
     for _, q in ipairs(QUARANTINE) do if q == name then return true end end
