@@ -92,9 +92,21 @@ def check(path: Path):
                 if p:
                     params.add(p)
 
+    # FOUND LIVE 2026-08-10: this only ever matched `local NAME = ...`. It
+    # never matched `local function NAME(...)` -- a DIFFERENT declaration
+    # shape that is at least as common in this codebase (log(), itemsOrNil(),
+    # ownerKeyFor(), ... dozens of these). itemsOrNil in 10_fishing.lua was
+    # declared ~370 lines below its first call site, threw "attempt to call
+    # global 'itemsOrNil' (a nil value)" live inside the onKeyDown handler
+    # every time a player pressed G to stop fishing with CFG.openPackOnCollect
+    # on (the default) -- the exact FISH_PREFERENCE use-before-declare shape
+    # L1 exists to catch, on a declaration style L1 was blind to. Now matches
+    # both.
     decls = {}
     for i, l in enumerate(lines, 1):
-        m = re.match(r"local\s+([A-Za-z_]\w*)\s*(=|$)", l)   # column 0 only
+        m = re.match(r"local\s+([A-Za-z_]\w*)\s*(=|$)", l)   # column 0: local NAME = ...
+        if not m:
+            m = re.match(r"local\s+function\s+([A-Za-z_]\w*)\s*\(", l)   # column 0: local function NAME(...)
         if m:
             decls.setdefault(m.group(1), i)
 
@@ -190,6 +202,15 @@ def _selftest() -> int:
          "print(theValueHere)\nlocal theValueHere = 1\n", "L1")
     case("L1 silent on ordinary code", "x.lua",
          "local theValueHere = 1\nprint(theValueHere)\n", None)
+    # `local function NAME()` -- the live 2026-08-10 bug (itemsOrNil in
+    # 10_fishing.lua, ~370 lines below its first caller). The original
+    # decl regex only matched `local NAME = ...` and never this shape.
+    case("L1 fires on use-before-declare of a `local function`", "x.lua",
+         "local function callerNeedsIt()\n  return itemsHelperLong()\nend\n"
+         "local function itemsHelperLong() return true end\n", "L1")
+    case("L1 silent when the `local function` is declared first", "x.lua",
+         "local function itemsHelperLong() return true end\n"
+         "local function callerNeedsIt()\n  return itemsHelperLong()\nend\n", None)
 
     # L2: banned engine internals
     case("L2 fires on :process(", "x.lua", "factory:process()\n", "L2")

@@ -1068,6 +1068,27 @@ function Fishing.openCatchPane(character)
     return true, "character pane"
 end
 
+-- FOUND LIVE 2026-08-10: itemsOrNil was declared far below its first use
+-- here (~370 lines down, right before Fishing.bankItem) -- the exact
+-- FISH_PREFERENCE use-before-declare shape this file has already been
+-- burned by once (see the "FORWARD DECLARATIONS" note above tryCatch).
+-- Every G-toggle-off with CFG.openPackOnCollect=true (the default) calls
+-- depositAndShow, which threw "attempt to call global 'itemsOrNil' (a nil
+-- value)" immediately -- an UNCAUGHT error inside the onKeyDown handler, so
+-- the deposit never ran and the catch stayed banked with no pane shown.
+-- Reproduced live 3 times in one session; the game kept accepting input
+-- afterward (confirmed by later FISH KEY MATCHED lines), so this was a
+-- script crash in the deposit path, not the #21/#37 engine-level freeze --
+-- but from the player's seat, "pressing G to stop and get your catch does
+-- nothing" reads exactly like losing the character. itemsOrNil has zero
+-- dependencies (just reads the _G.Items global), so moving its definition
+-- above its first caller is the whole fix -- no forward-declare needed.
+local function itemsOrNil()
+    local ok, m = pcall(function() return _G.Items end)
+    if ok and type(m) == "table" and type(m.bank) == "function" then return m end
+    return nil
+end
+
 -- Put the banked catch into a real container, then show that container's pane.
 --
 -- Preference order, and it matters:
@@ -1380,7 +1401,8 @@ local function barUpdate(s, character, frac, caption)
     -- The FIELD is 0..1000 (integer, mirroring the widget's RangePosition of
     -- Range=1000 in Kenshi_ProgressBarPanel.layout). The METHOD normalises.
     -- Feed each the scale it wants instead of one value to both.
-    pcall(function() bar.progress = math.floor(frac * BAR_RANGE) end)  -- 0..1000
+    local fieldValue = math.floor(frac * BAR_RANGE)
+    pcall(function() bar.progress = fieldValue end)                    -- 0..1000
     pcall(function() bar:setProgress(frac) end)                        -- 0..1
     pcall(function() bar.needUpdate = true end)   -- ScreenLabelInterface repaint flag
     pcall(function() bar:update() end)
@@ -1388,11 +1410,23 @@ local function barUpdate(s, character, frac, caption)
     -- One readback, mid-cast, to see whether the value is landing at all. If it
     -- reads back what we wrote and the bar still looks empty, the problem is the
     -- repaint rather than the value -- a different fix entirely.
+    --
+    -- FOUND LIVE 2026-08-10: this referenced an undefined global `v` (the
+    -- written value was never captured into a local -- see fieldValue above,
+    -- added by this fix) and used %d instead of %s, so `nil` hit a numeric
+    -- format specifier and threw "bad argument #1 to 'format' (number
+    -- expected, got nil)" INSIDE the ~100Hz onCharsUpdate handler. The exact
+    -- failure mode the comment on the position-basis logger a few lines
+    -- above this one already warns about ("a DIAGNOSTIC must never be able
+    -- to kill the tick it is diagnosing") -- that one used %s/tostring()
+    -- defensively; this one, a few lines below its own warning, did not.
+    -- Fixed the same way: %s + tostring() on every value, so a diagnostic
+    -- can be wrong but never fatal.
     if not Fishing._barProgLogged and frac > 0.3 then
         Fishing._barProgLogged = true
         local okR, got = pcall(function() return bar.progress end)
-        log(("bar progress: wrote %d (range %d) -> reads back %s")
-            :format(v, BAR_RANGE, okR and tostring(got) or "ERROR"))
+        log(("bar progress: wrote %s (range %s) -> reads back %s")
+            :format(tostring(fieldValue), tostring(BAR_RANGE), okR and tostring(got) or "ERROR"))
     end
 end
 
@@ -1451,12 +1485,6 @@ end
 -- If Items is missing entirely, fishing degrades to a private bag rather than
 -- erroring -- the same "must survive a missing dependency" discipline as
 -- StarFall's rule 4.
-local function itemsOrNil()
-    local ok, m = pcall(function() return _G.Items end)
-    if ok and type(m) == "table" and type(m.bank) == "function" then return m end
-    return nil
-end
-
 function Fishing.bankItem(ownerName, itemId)
     local I = itemsOrNil()
     if I then return I.bank(ownerName, itemId, 1) or 0 end
