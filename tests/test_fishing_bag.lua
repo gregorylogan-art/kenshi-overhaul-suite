@@ -204,6 +204,65 @@ if _G.Items and _G.Cooking then
     if H.failed > 0 then error("handoff failed", 0) end
 end
 
+-- ============================================================================
+-- DOCK LOOP: haul -> shared storage -> cook from storage (#24, 2026-08-09)
+--
+-- Greg: the vanilla farm shape (harvest, haul to storage, work from storage,
+-- loop) should apply to fishing too -- fish, haul to storage, cooks take from
+-- storage and cook. Storage.lua already provides the shared-owner-key ledger
+-- this needs; Fishing.haulToDock and Cooking.cookFromDock/canCookFromDock are
+-- thin call sites on top of it, not a second implementation.
+--
+-- NOT COVERED HERE: Fishing.haulToDock() itself, which calls
+-- getSelectedCharacter() -- a real engine global absent in this headless
+-- runner. The haul step is simulated with a direct Storage.deposit (exactly
+-- what a successful haul produces), so this still exercises the REAL new
+-- code -- Cooking.cook's ownerKeyOverride threading and the cookFromDock/
+-- canCookFromDock wrappers -- everything except the engine-facing character
+-- lookup itself. Same boundary this file's own header note already draws
+-- for Fishing.collect()'s mint path; a live run still owns proving the haul
+-- call site works end to end.
+-- ============================================================================
+if _G.Items and _G.Storage and _G.Cooking then
+    local D = { passed = 0, failed = 0, names = {} }
+    local function dcheck(name, cond, detail)
+        if cond then D.passed = D.passed + 1
+        else
+            D.failed = D.failed + 1
+            D.names[#D.names + 1] = name .. (detail and ("  -- " .. tostring(detail)) or "")
+        end
+    end
+
+    local DOCK = "__testdock__"
+    local dockKey = Storage.key(DOCK)
+    Items.bags[dockKey], Items.counts[dockKey], Items.ledger[dockKey] = nil, nil, nil
+
+    -- Simulated haul: a fisher's catch lands in the dock's shared storage.
+    Storage.deposit(DOCK, "Small Fish", 8)
+    dcheck("dock: hauled fish present in storage", Storage.stockOf(DOCK)["Small Fish"] == 8)
+
+    -- A cook, with no bag of their own, works directly from the dock.
+    local FAKE_COOK = {}   -- no getStats/getName; every real-Character call inside
+                            -- Cooking.cook is pcall-wrapped and degrades safely
+    local can, why = Cooking.canCookFromDock(FAKE_COOK, DOCK)
+    dcheck("dock: cook can see the hauled fish", can == true, why)
+
+    local cooked, burnt, err = Cooking.cookFromDock(FAKE_COOK, DOCK, 8)
+    dcheck("dock: cook consumed exactly what was hauled", cooked + burnt == 8,
+           ("cooked=%s burnt=%s err=%s"):format(tostring(cooked), tostring(burnt), tostring(err)))
+
+    local afterStock = Storage.stockOf(DOCK)
+    dcheck("dock: raw fish fully consumed from storage", (afterStock["Small Fish"] or 0) == 0)
+    dcheck("dock: product landed back in the SAME dock (shared hub, not the cook's own bag)",
+           (afterStock["Cooked Fish"] or 0) + (afterStock["Burnt Fish"] or 0) == 8)
+    dcheck("dock: invariants clean end to end", #Items.verify() == 0)
+
+    Items.bags[dockKey], Items.counts[dockKey], Items.ledger[dockKey] = nil, nil, nil
+    print(("--- DOCK LOOP: %d passed, %d failed ---"):format(D.passed, D.failed))
+    for _, n in ipairs(D.names) do print("    FAILED: " .. n) end
+    if D.failed > 0 then error("dock loop failed", 0) end
+end
+
 print(("--- FISHING BAG: %d passed, %d failed ---"):format(T.passed, T.failed))
 for _, n in ipairs(T.names) do print("    FAILED: " .. n) end
 if T.failed > 0 then error("fishing bag characterization failed", 0) end

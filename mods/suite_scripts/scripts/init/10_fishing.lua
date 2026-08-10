@@ -1582,6 +1582,41 @@ function Fishing.collect()
     return moved
 end
 
+-- ---------------------------------------------------------------------------
+-- Fishing.haulToDock(dockKey) -- the "haul" step of Greg's farm-style loop
+-- (#24): harvest, haul to storage, [work from storage, loop]. Moves the
+-- selected character's WHOLE banked bag (fish and junk both -- a real haul
+-- brings back everything, sorting happens later) into a named dock's shared
+-- storage via Storage.transferAll, which already does the debit-then-credit-
+-- with-rollback conservation work (16_storage.lua) -- this is not a second
+-- transfer implementation, just a fishing-flavoured call site for it.
+--
+-- dockKey is a free label, same as every Storage site key -- no registration
+-- needed. "Squin Dock" and "squin dock" are DIFFERENT keys (Storage does no
+-- normalization); pick one spelling and keep using it.
+--
+-- Nothing here checks the character is actually standing at/near the dock --
+-- that is presentation-layer distance-checking this file does not have yet.
+-- Today this is a deliberate action the player takes (or later, what a
+-- hauler NPC's job would call); it is not gated on physical proximity.
+-- ---------------------------------------------------------------------------
+function Fishing.haulToDock(dockKey)
+    if type(dockKey) ~= "string" or dockKey == "" then
+        log("haulToDock: give a dock name, e.g. Fishing.haulToDock(\"Squin Dock\")")
+        return 0
+    end
+    if not Storage then log("haulToDock: Storage module not loaded") return 0 end
+
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then log("haulToDock: select a character first") return 0 end
+    local okN, name = pcall(function() return c:getName() end)
+    name = (okN and name) or "?"
+
+    local moved = Storage.transferAll(name, Storage.key(dockKey))
+    log(("%s: hauled %d item(s) to dock '%s'"):format(name, moved, dockKey))
+    return moved
+end
+
 -- Fishing.setOpenPack(false) -- stop the pack window opening on collect.
 function Fishing.setOpenPack(on)
     CFG.openPackOnCollect = (on == true)

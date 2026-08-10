@@ -97,8 +97,16 @@ end
 -- Caught headlessly by walking the fishing -> cooking handoff before Greg ever
 -- ran it, which is exactly what the harness is for -- in a live session this
 -- would have looked like cooking being broken rather than a name mismatch.
-local function rawNameFor(character)
-    local key = ownerKeyFor(character)
+-- ownerKeyOverride (2026-08-09, #24): cook from a SITE's storage instead of
+-- the character's own bag -- "cooks take from storage and cook", the same
+-- shape wheat farming already uses in vanilla Kenshi (harvest, haul to
+-- storage, work from storage). Storage.lua's site keys are namespaced
+-- (Storage.key(dock) = "site:"..dock), so passing one straight through as
+-- the owner key works unmodified: Items.bagOf/.take/.bank do not care
+-- whether a key names a character or a site. Omit it for the original
+-- per-character behavior -- fully backward compatible.
+local function rawNameFor(character, ownerKeyOverride)
+    local key = ownerKeyOverride or ownerKeyFor(character)
     local bag = (Items and Items.bagOf) and Items.bagOf(key) or {}
 
     -- 1. a configured raw name that is actually banked
@@ -116,11 +124,11 @@ end
 -- ---------------------------------------------------------------------------
 -- CONTRACT: canCook
 -- ---------------------------------------------------------------------------
-function Cooking.canCook(character)
+function Cooking.canCook(character, ownerKeyOverride)
     if not character then return false, "no character" end
     if not Items then return false, "items module not loaded" end
-    local key = ownerKeyFor(character)
-    local raw = rawNameFor(character)
+    local key = ownerKeyOverride or ownerKeyFor(character)
+    local raw = rawNameFor(character, ownerKeyOverride)
     local bag = Items.bagOf(key)
     local have = bag[raw] or 0
     if have <= 0 then
@@ -134,13 +142,13 @@ end
 -- ---------------------------------------------------------------------------
 -- Consumes raw fish from the bag and banks the product back into the same bag.
 -- No inventory call anywhere in this function -- deliberately, and permanently.
-function Cooking.cook(character, n)
+function Cooking.cook(character, n, ownerKeyOverride)
     n = tonumber(n) or 1
     if not character then return 0, 0, "no character" end
     if not Items then return 0, 0, "items module not loaded" end
 
-    local key = ownerKeyFor(character)
-    local raw = rawNameFor(character)
+    local key = ownerKeyOverride or ownerKeyFor(character)
+    local raw = rawNameFor(character, ownerKeyOverride)
     local bag = Items.bagOf(key)
     local have = bag[raw] or 0
     if have <= 0 then return 0, 0, ("no %s banked"):format(raw) end
@@ -174,6 +182,25 @@ function Cooking.cook(character, n)
     log(("%s: cooked %d, burnt %d (burn chance %.0f%% at skill %.1f)")
         :format(key, cooked, burnt, burnChance * 100, skill))
     return cooked, burnt, nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Cooking.cookFromDock -- the storage-hub loop (#24). A cook stationed at a
+-- dock consumes raw fish OTHER characters hauled there (Fishing.haulToDock,
+-- 10_fishing.lua) and banks the product back into the SAME site, so the dock
+-- becomes a shared hub: fish arrives, cooked fish leaves, all through one
+-- ledger. Thin wrapper, not a second implementation -- Storage.key() is just
+-- an Items owner key with a namespace prefix, so this is Cooking.cook() with
+-- that key substituted in.
+-- ---------------------------------------------------------------------------
+function Cooking.cookFromDock(character, dockKey, n)
+    if not Storage then return 0, 0, "storage module not loaded" end
+    return Cooking.cook(character, n, Storage.key(dockKey))
+end
+
+function Cooking.canCookFromDock(character, dockKey)
+    if not Storage then return false, "storage module not loaded" end
+    return Cooking.canCook(character, Storage.key(dockKey))
 end
 
 -- Cooking.status() -- what is cookable right now.
