@@ -201,7 +201,7 @@ local EVENTS = {
     -- ECONOMY / TOWNS / SHOP RIGHTS (#28, #46, #48, #50)
     { event = "onItemGetValueSingle",            tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onBuildingCalculateSaleValue",    tag = "ECON" },    -- OVERRIDE, logged read-only
-    { event = "onBuildingIsForSale",              tag = "ECON" },    -- OVERRIDE, direct hit on #50
+    { event = "onBuildingIsForSale",              tag = "ECON" },    -- OVERRIDE, direct hit on #50 -- skipped below, crashes on registerHandler (msvcr100.dll assert)
     { event = "onBuildingIsPublic",               tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onBuildingUseCheck",               tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onPlatoonIBuyStolenGoods",        tag = "ECON" },    -- OVERRIDE, logged read-only
@@ -256,6 +256,23 @@ local QUARANTINE = {
     -- that happened to land while this was running. Quarantined as the best
     -- available suspect rather than left live on an unproven guess either way.
     "onCharacterEat",
+
+    -- FOUND LIVE 2026-08-10 (third incident, ECON tag): log ends on
+    -- "REGISTERING: onBuildingIsForSale" with NO matching "registered -> ok"
+    -- right after -- the crash is inside THIS registerHandler call, not a
+    -- fired event, same shape as the very first Observer.start() crash this
+    -- file's log-as-cursor design exists to catch. read_crashdump.py
+    -- independently confirms it: a FRESH crashDump*_x64.zip, EXCEPTION_BREAKPOINT
+    -- (0x80000003) inside msvcr100.dll -- the MSVC10 C runtime's assert/abort
+    -- path, not KenshiLua.dll. Matches what Greg saw on screen ("assertion
+    -- failure, instant crash") independent of this tool. NOT PROVEN why --
+    -- could be a signature/arity check the underlying dispatcher runs only
+    -- for this specific OVERRIDE slot, or a "may only have one registered
+    -- override" invariant something else already holds. #50 called this hook
+    -- out as a direct hit; that investigation needs a different observation
+    -- strategy (Projector-style single-purpose probe, not bulk Observer) or
+    -- confirmation from KenshiLua's own source before retrying live.
+    "onBuildingIsForSale",
 }
 local function quarantined(name)
     for _, q in ipairs(QUARANTINE) do if q == name then return true end end
