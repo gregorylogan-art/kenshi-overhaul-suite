@@ -105,6 +105,30 @@ end
 local EVENT_LOG_SAMPLE = 3     -- log this many occurrences in full detail
 local EVENT_LOG_EVERY  = 50    -- then a count-only line every N after that
 
+-- HYPER-HOT OVERRIDE. FOUND LIVE 2026-08-10 (third incident, TAVERN tag):
+-- onDialogueStartConversation hit 17,500+ firings and onDialogueCheckCondition
+-- hit 9,000+ in a single short session with trade + hire windows open -- an
+-- order of magnitude above every other event tested (onGetStat topped out at
+-- 7,850; xpStealth at 9,300, both survived cleanly at EVENT_LOG_EVERY=50).
+-- This session ended in a REAL crash: read_crashdump.py confirmed a NEW
+-- crashDump*_x64.zip (fresh mtime, not a stale hang like the earlier
+-- SLAVE-tag incident) with an EXCEPTION_ACCESS_VIOLATION inside
+-- MyGUIEngine_x64.dll -- Kenshi's GUI engine, which owns dialogue/trade
+-- windows. That is NOT KenshiLua.dll, so this is not proof our code faulted
+-- directly -- but these two hooks appear to be polled continuously by the
+-- engine while dialogue-adjacent UI (trade, hire) is open, not just once per
+-- actual conversation, and registering a handler on ~26,500 combined
+-- crossings in a few minutes is a very plausible way to add enough overhead
+-- to tip a latent vanilla GUI-engine race. Both events' argument shapes are
+-- already confirmed (see #29) -- there is nothing left to learn from logging
+-- them at the same density as a normal event, so they get a much coarser
+-- interval instead of being quarantined outright (still want the running
+-- count from Observer.counts()).
+local HYPER_HOT_EVERY = {
+    onDialogueStartConversation = 2000,
+    onDialogueCheckCondition    = 2000,
+}
+
 local eventCounts = {}   -- ["tag:event"] = count, session-transient
 
 function Observer.counts()
@@ -118,15 +142,16 @@ end
 -- exactly once, not once per registration path.
 local function makeObserverHandler(e)
     local key = e.tag .. ":" .. e.event
+    local every = HYPER_HOT_EVERY[e.event] or EVENT_LOG_EVERY
     return function(...)
         local n = (eventCounts[key] or 0) + 1
         eventCounts[key] = n
         if n <= EVENT_LOG_SAMPLE then
             log(("[%s] %s(%s)"):format(e.tag, e.event, describeArgs(...)))
-        elseif n % EVENT_LOG_EVERY == 0 then
+        elseif n % every == 0 then
             log(("[%s] %s fired %d times so far (full detail for the first %d, "
                  .. "a count line every %d after that -- Observer.counts() for the running tally)")
-                :format(e.tag, e.event, n, EVENT_LOG_SAMPLE, EVENT_LOG_EVERY))
+                :format(e.tag, e.event, n, EVENT_LOG_SAMPLE, every))
         end
         -- NO return statement -- see the file header. This is the entire
         -- safety contract for every OVERRIDE-category event in the list.
@@ -348,3 +373,9 @@ log(("watching %d events across JOBS/SLAVE/SHADOW/TAVERN/ECON/BUILD/LIFE/SKILL")
 log("TIP: game speed multiplies event volume proportionally -- 20x speed compressed")
 log("~80 real minutes of NPC activity into ~4 (1510 equip/unequip firings). Prefer 1x")
 log("speed for a new tag group's first run, at least until it has proven quiet.")
+log("CAUTION: TAVERN's onDialogueStartConversation/onDialogueCheckCondition fired")
+log("17500+/9000+ times in one short trade+hire+dialogue session and that session")
+log("ended in a real MyGUIEngine_x64.dll access violation (fresh crash dump, not a")
+log("hang -- see read_crashdump.py). Both hooks are now throttled to 1-in-2000, but")
+log("prefer 1x speed and avoid stacking trade/hire UI with heavy dialogue when")
+log("re-running TAVERN.")
