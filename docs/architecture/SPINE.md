@@ -111,6 +111,64 @@ docs' argument column is simply unreliable (29 confirmed cases of that).
 then feed it to `addItem`. Until confirmed, fishing banks catches in suite state
 and reports grant success honestly rather than faking it.
 
+## OPEN: NPC job/task assignment (the Alive Core / Projector dependency)
+
+**2026-08-09.** Issues #28, #33, #34 all cite `onCharacterAddJob`/`AddOrder`/
+`AddGoal` as "verified hooks" enabling NPC-driven jobs (town production, road
+traffic, slavery tasks). They are not verified — that name does not appear
+anywhere in this repo's actual probe output (`_probe_raw.txt`, 498/500 API
+surface tested 2026-08-01) or in `probe_manifest.lua`'s safe-callable set.
+It came from the (known-unreliable) bindings doc, not from a probe run.
+
+**What IS real, found by cross-referencing the raw bindings doc against the
+actual C++ headers in `third_party/KenshiLib`** (static analysis only — NONE
+of this has been called live):
+
+- `Character:addJob(t, shift, addDontClear, location)` — per
+  `third_party/KenshiLua/docs/BindingsReference.md`.
+- **But the real C++ signature disagrees with that doc**, per
+  `third_party/KenshiLib/Include/kenshi/AI/AITaskSystem.h`:
+  `void addJob(TaskType t, const hand& subject, const Ogre::Vector3& location, bool shift)`
+  — argument COUNT matches (4), but the TYPE and ORDER of args 2-4 do not:
+  the doc says `(shift: boolean, addDontClear: boolean, location: Vector3)`,
+  the header says `(subject: hand, location: Vector3, shift: boolean)`.
+  This is exactly the failure class SPINE's headline finding #1 already
+  named ("29 more take arguments the docs say they don't") — now with a
+  concrete example for the single most load-bearing call in the roadmap.
+- Sibling calls, same file: `addOrder(t, shift, clear, location)` (doc) vs.
+  `addOrder(TaskType t, const hand& subject, const Vector3& location, bool clear, bool shift)`
+  (header — 5 args, doc only lists 4). `addGoal(t)` — doc and header agree
+  (1 int arg) and this is the lowest-risk of the three to test first.
+- `removeJob(t)`, `getPermajob(slot)`, `getPermajobData(slot) -> Tasker`,
+  `getPermajobCount()` also exist. **`getPermajobCount()` takes zero args and
+  IS in the safe-callable manifest** (`probe_manifest.lua` line ~381) — this
+  one can be read live with no more risk than any other verified zero-arg
+  getter already in daily use.
+- The real `enum TaskType` (`third_party/KenshiLib/Include/kenshi/Enums.h`,
+  291 entries, 0-indexed) is fully enumerated. Task ids directly relevant to
+  the roadmap: `NULL_TASK=0`, `IDLE=14`, `WANDERER=24`, `MOVE_CUS_ORDERED=29`,
+  `HOLD_POSITION=30`, `PATROL_TOWN=36`, `WANDER_TOWN=37`,
+  `FOLLOW_PLAYER_ORDER=44`, `RECRUIT_AT_JOBCENTER=55`, `STAND_STILL=62`,
+  `OPERATE_MACHINERY=87`, `DELIVER_RESOURCES=88`, `COLLECT_OUTPUT_RESOURCE=92`,
+  `FIND_A_SHOP=117`, `SHOPPING=118`, `BUY_SHIT=119`, `JOB_BUILDER=125`. If any
+  of `addJob`/`addOrder`/`addGoal` actually work, `OPERATE_MACHINERY` /
+  `COLLECT_OUTPUT_RESOURCE` / `DELIVER_RESOURCES` are the exact engine-native
+  task shape #40's mining-window pattern already described — worth trying
+  before inventing a Lua-side equivalent.
+
+**Route to test, in risk order (safest first):** read `getPermajobCount()`
+live (zero risk, same as any other verified getter) → try `addGoal(TaskType)`
+with `IDLE` or `WANDERER` on a deliberately disposable, non-squad NPC (1 int
+arg, lowest surface area) → only then attempt `addJob`/`addOrder`, trying the
+C++ header's argument shape first since it is the primary source, with each
+variant behind its own pcall AND a log line printed BEFORE the call (the
+`01_capability_probe.lua` LOG-AS-CURSOR discipline — pcall does not catch a
+native access violation, so the log is the only thing that survives a crash
+and names the killer). See `mods/suite_scripts/scripts/27_projector_probe.lua`.
+
+Until this is run live and harvested back into this file, #28/#33/#34's
+"verified hooks" claim should be read as "found in a header," not "proven."
+
 ## Danger list — never call these
 
 | Pattern | Why |
