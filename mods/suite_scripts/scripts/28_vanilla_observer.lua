@@ -25,10 +25,23 @@
 --      is a pure observer too: the engine's own calculation always wins,
 --      unchanged. This file cannot alter gameplay, only watch it.
 --
+-- WHAT "SAFE" DID NOT COVER, FOUND LIVE 2026-08-10: a handler FIRING safely
+-- is a different claim from REGISTERING it being safe. The first version of
+-- Observer.start() crashed the game with zero log output between it starting
+-- and the process dying -- pcall around registerHandler is worthless against
+-- a native crash (KENSHI-ENGINE-NOTES.md's own rule 1, now hit twice this
+-- project). Every registerHandler call below is now preceded by its own log
+-- line, so a repeat crash names the exact event instead of leaving all 38 as
+-- suspects. See QUARANTINE below Observer.stop().
+--
 -- CONTRACT
---     Observer.start()      -> registers every listed hook
---     Observer.stop()       -> unregisters all of them
---     Observer.list()       -> prints what is being watched, by tag
+--     Observer.start()          -> registers every non-quarantined hook,
+--                                   logging each registration attempt BEFORE
+--                                   it happens
+--     Observer.startOne(name)   -> register exactly ONE event, for bisecting
+--                                   a crash without risking the rest
+--     Observer.stop()           -> unregisters all of them
+--     Observer.list()           -> prints what is being watched, by tag
 --
 --   dofile("mods/KenshiLua/scripts/28_vanilla_observer.lua")
 --   Observer.start()
@@ -139,6 +152,28 @@ local EVENTS = {
     { event = "xpRunning",                        tag = "SKILL" },
 }
 
+-- QUARANTINE -- event names that crashed the game DURING REGISTRATION (not
+-- during a fired callback -- see the note below). Add here as they are
+-- found; Observer.start() skips them.
+--
+-- FOUND LIVE 2026-08-10: the first version of this function crashed Kenshi
+-- with ZERO log output between "Projector observing -- 3 hook(s) armed" and
+-- the process dying -- not even a partial "registered N of 38" line, because
+-- the only log call was a SUMMARY after the whole loop finished. registerHandler
+-- itself was wrapped in pcall, which is worthless here: pcall does not catch
+-- a native access violation, the same lesson KENSHI-ENGINE-NOTES.md already
+-- states and this project has now hit twice. The loop crashed silently on
+-- SOME event in the list, and there was no way to tell which. Fixed below by
+-- logging the event name BEFORE each individual registerHandler call --
+-- log-as-cursor, applied to REGISTRATION, not just to firing a callback.
+local QUARANTINE = {
+    -- "eventName", -- add here once identified from a crash log
+}
+local function quarantined(name)
+    for _, q in ipairs(QUARANTINE) do if q == name then return true end end
+    return false
+end
+
 -- ---------------------------------------------------------------------------
 function Observer.start()
     if type(registerHandler) ~= "function" then
@@ -152,16 +187,26 @@ function Observer.start()
 
     local byTag = {}
     for _, e in ipairs(EVENTS) do
-        local ok, hid = pcall(registerHandler, e.event, function(...)
-            log(("[%s] %s(%s)"):format(e.tag, e.event, describeArgs(...)))
-            -- NO return statement -- see the file header. This line is the
-            -- entire safety contract for every OVERRIDE-category event above.
-        end)
-        if ok and hid then
-            Observer._handlers[#Observer._handlers + 1] = hid
-            byTag[e.tag] = (byTag[e.tag] or 0) + 1
+        if quarantined(e.event) then
+            log("SKIP (quarantined): " .. e.event)
         else
-            log(("FAILED to register %s -- %s"):format(e.event, tostring(hid)))
+            -- LOG-AS-CURSOR ON REGISTRATION ITSELF, not just on firing. If
+            -- this crashes, the last "REGISTERING" line with no matching
+            -- "registered ->" line right after it names the killer.
+            log("REGISTERING: " .. e.event)
+            local ok, hid = pcall(registerHandler, e.event, function(...)
+                log(("[%s] %s(%s)"):format(e.tag, e.event, describeArgs(...)))
+                -- NO return statement -- see the file header. This line is
+                -- the entire safety contract for every OVERRIDE-category
+                -- event above.
+            end)
+            if ok and hid then
+                log("  registered -> ok")
+                Observer._handlers[#Observer._handlers + 1] = hid
+                byTag[e.tag] = (byTag[e.tag] or 0) + 1
+            else
+                log(("  FAILED to register %s -- %s"):format(e.event, tostring(hid)))
+            end
         end
     end
 
@@ -171,6 +216,56 @@ function Observer.start()
     log("does across these systems prints here. Observer.stop() when done, then:")
     log("  python tools/readlog.py --tag OBS")
     log("  python tools/readlog.py --tag SLAVE   (or SHADOW, TAVERN, ECON, BUILD, LIFE, SKILL, JOBS)")
+end
+
+-- Observer.startOne("onLimbAmputated") -- register exactly ONE event by
+-- name, for bisecting a crash without risking the rest of the batch. Not
+-- tracked in Observer._handlers (Observer.stop() will not clear it) --
+-- this is a scratch tool, not part of the normal session flow.
+function Observer.startOne(eventName)
+    if type(registerHandler) ~= "function" then
+        log("registerHandler unavailable")
+        return
+    end
+    local tag = "?"
+    for _, e in ipairs(EVENTS) do if e.event == eventName then tag = e.tag end end
+    log("REGISTERING (solo): " .. eventName)
+    local ok, hid = pcall(registerHandler, eventName, function(...)
+        log(("[%s] %s(%s)"):format(tag, eventName, describeArgs(...)))
+    end)
+    log(ok and ("  registered -> ok (handle " .. tostring(hid) .. ")")
+             or ("  FAILED -- " .. tostring(hid)))
+end
+
+-- Observer.startTag("SLAVE") -- register only the events in one tag group.
+-- A smaller blast radius than Observer.start()'s full 38 -- if a retry after
+-- a crash still feels risky, work through tag groups one at a time instead
+-- (JOBS, SLAVE, SHADOW, TAVERN, ECON, BUILD, LIFE, SKILL -- see Observer.list()).
+-- Adds to whatever is already registered rather than replacing it, so
+-- several startTag() calls compose; Observer.stop() clears everything
+-- regardless of which function armed it.
+function Observer.startTag(wantTag)
+    if type(registerHandler) ~= "function" then
+        log("registerHandler unavailable")
+        return
+    end
+    local n = 0
+    for _, e in ipairs(EVENTS) do
+        if e.tag == wantTag and not quarantined(e.event) then
+            log("REGISTERING: " .. e.event)
+            local ok, hid = pcall(registerHandler, e.event, function(...)
+                log(("[%s] %s(%s)"):format(e.tag, e.event, describeArgs(...)))
+            end)
+            if ok and hid then
+                log("  registered -> ok")
+                Observer._handlers[#Observer._handlers + 1] = hid
+                n = n + 1
+            else
+                log("  FAILED -- " .. tostring(hid))
+            end
+        end
+    end
+    log(("%s: %d event(s) armed"):format(wantTag, n))
 end
 
 function Observer.stop()
