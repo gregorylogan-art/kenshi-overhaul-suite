@@ -139,11 +139,21 @@ function Rumor.generate()
 
     -- Activity-level flavor (WSM.queryHistory -- the one thing it can
     -- honestly answer: HOW MUCH, not WHAT/WHO).
+    --
+    -- BUG FOUND IN THE FIRST LIVE RUN (2026-08-10): this only checked the
+    -- "economy" category (Economy.lua's vendor sell/mint/drain), so
+    -- TownEconomy's daily production -- which writes to "settlements", a
+    -- DIFFERENT category -- could never register as "busy" no matter how
+    -- much town production ran. Both now count; "activity" means either kind
+    -- of thing happening, not specifically money changing hands.
     if WSM and WSM.queryHistory and WSM.day then
-        local recent = WSM.queryHistory({ category = "economy", sinceDay = WSM.day() - CFG.lookbackDays })
-        if #recent >= CFG.busyMutations then
+        local sinceDay = WSM.day() - CFG.lookbackDays
+        local econRecent = WSM.queryHistory({ category = "economy", sinceDay = sinceDay })
+        local townRecent = WSM.queryHistory({ category = "settlements", sinceDay = sinceDay })
+        local total = #econRecent + #townRecent
+        if total >= CFG.busyMutations then
             out[#out + 1] = pick(TEMPLATES.busy)
-        elseif #recent == 0 then
+        elseif total == 0 then
             out[#out + 1] = pick(TEMPLATES.quiet)
         end
     end
@@ -235,6 +245,22 @@ function Rumor.selftest()
             for _, t in ipairs(TEMPLATES.busy) do if l == t then sawBusy = true end end
         end
         check("enough recent activity produces a 'busy' rumor instead", sawBusy, table.concat(busyLines, " | "))
+
+        -- REGRESSION for the live-run bug (2026-08-10): "settlements"-only
+        -- activity (TownEconomy's shape, not Economy's) must ALSO count as
+        -- busy -- the first shipped version only checked "economy" and never
+        -- saw town production no matter how much of it ran.
+        WSM.reset()
+        for i = 1, CFG.busyMutations do
+            WSM.mutate("settlements", function() end, "test" .. i)
+        end
+        local townBusyLines = Rumor.generate()
+        local sawTownBusy = false
+        for _, l in ipairs(townBusyLines) do
+            for _, t in ipairs(TEMPLATES.busy) do if l == t then sawTownBusy = true end end
+        end
+        check("settlements-only activity ALSO produces a 'busy' rumor (the live-run bug)",
+              sawTownBusy, table.concat(townBusyLines, " | "))
 
         WSM.reset()
     end
