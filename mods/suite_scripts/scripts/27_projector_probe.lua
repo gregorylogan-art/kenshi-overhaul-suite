@@ -5,11 +5,33 @@
 -- downstream of them (#25, #46, #49, #50): can Lua actually drive an NPC
 -- through a job/task, or is "verified hooks" in those issues just a doc claim
 -- that was never run? See docs/architecture/SPINE.md's "OPEN: NPC job/task
--- assignment" section for the full static-analysis writeup this probe tests
--- -- including the finding that the bindings doc and the real C++ header
--- (AITaskSystem.h) DISAGREE on addJob/addOrder's argument shape.
+-- assignment" section for the full writeup this probe tests.
 --
--- THREE PHASES, RISK-ORDERED (the 01_capability_probe.lua discipline):
+-- 2026-08-10 UPDATE -- found `third_party/KenshiLua/docs/CallbacksReference.md`,
+-- a dedicated event-callback reference distinct from BindingsReference.md
+-- (methods/fields only), which neither prior pass had checked. It resolves
+-- addJob's real signature with much higher confidence than either doc or
+-- header alone, straight from the compiled hook's own C++ dispatcher:
+--   void CallCharacterAddJobCallbacks(Character* character, int task,
+--       RootObject* subject, bool shift, bool addDontClear, const Vector3& location)
+-- i.e. the REAL call is addJob(task, subject, shift, addDontClear, location) --
+-- BindingsReference.md's doc entry was not wrong about order so much as
+-- MISSING the `subject` parameter entirely. Phase 3 below now tries this
+-- shape first.
+--
+-- It also confirms onCharacterAddJob/onCharacterAddOrder/onCharacterRemoveJob
+-- are real NOTIFICATION hooks -- they fire whenever ANY code (including the
+-- game's own vanilla AI) calls the real addJob/addOrder/removeJob, and do not
+-- themselves call anything. That makes a whole new lowest-risk phase possible:
+-- OBSERVE what tasks the game assigns real NPCs during normal, unmodified
+-- play -- e.g. watch a farmer to see the actual TaskType sequence behind the
+-- wheat loop -- with zero calls of our own and therefore zero crash risk.
+--
+-- FOUR PHASES, RISK-ORDERED (the 01_capability_probe.lua discipline):
+--   0. OBSERVE. Register the three notification hooks and log every job/order
+--      the game's OWN AI assigns to ANY character. No calls, no risk -- this
+--      cannot crash anything, because it never calls into the engine, only
+--      reacts to what the engine already decided to do.
 --   1. READ-ONLY. getPermajobCount()/getPermajob() on the selected character.
 --      Zero-arg or int-slot getters only -- no more risk than any other
 --      verified getter already in daily use.
@@ -24,9 +46,13 @@
 --
 -- SAFETY: run phase 2/3 ONLY against a character you do not mind losing --
 -- not the player, not a squad member you care about. Click a random,
--- disposable townsperson before calling these.
+-- disposable townsperson before calling these. Phase 0 is safe on anyone,
+-- including the player, and is worth leaving running in the background
+-- while you play normally.
 --
 --   dofile("mods/KenshiLua/scripts/27_projector_probe.lua")
+--   Projector.startObserve()      -- phase 0, always safe, runs in the background
+--   Projector.stopObserve()       -- turn phase 0 back off
 --   Projector.testRead()          -- phase 1, always safe, any character
 --   Projector.testGoal("IDLE")    -- phase 2, select a DISPOSABLE NPC first
 --   Projector.testJobOrder("WANDERER")  -- phase 3, HIGHEST RISK, disposable NPC first
@@ -37,6 +63,14 @@ local function log(m) print(TAG .. tostring(m)) end
 
 Projector = Projector or {}
 pcall(function() _G.Projector = Projector end)
+
+-- RELOAD SAFETY for the phase-0 observer handlers -- same shape as
+-- 10_fishing.lua's generation guard: a dofile must not stack a second set of
+-- listeners logging everything twice.
+if Projector._handlers and type(unregisterHandler) == "function" then
+    for _, hid in ipairs(Projector._handlers) do pcall(unregisterHandler, hid) end
+end
+Projector._handlers = {}
 
 -- Real TaskType ordinals (third_party/KenshiLib/Include/kenshi/Enums.h,
 -- 291-entry C enum, 0-indexed -- cross-checked against the header directly,
@@ -63,6 +97,80 @@ Projector.TASK = {
     BUY_SHIT                = 119,
     JOB_BUILDER             = 125,
 }
+
+-- Reverse lookup (id -> name) so the observer can print a human-readable
+-- task name for the ones we bothered to name above. Only 16 of the 291 real
+-- TaskType values are named here (the ones relevant to this roadmap); an
+-- observed id outside that set just prints as a bare number, which is still
+-- useful -- SPINE.md's "OPEN" section has the full enum reference to look it
+-- up by hand.
+local TASK_NAME = {}
+for name, id in pairs(Projector.TASK) do TASK_NAME[id] = name end
+
+-- ---------------------------------------------------------------------------
+-- PHASE 0 -- OBSERVE. Zero calls of our own; these three hooks are pure
+-- NOTIFICATIONS that fire whenever ANY code (including vanilla AI) invokes
+-- the real addJob/addOrder/removeJob. Cannot crash anything it did not
+-- already crash on its own -- this only reacts, never calls.
+--
+-- This is the direct answer to "does wheat farming actually use addJob, and
+-- with what TaskType" -- watch a real farmer NPC for a few in-game minutes
+-- and read it off the log instead of guessing.
+-- ---------------------------------------------------------------------------
+local function taskLabel(taskId)
+    local n = tonumber(taskId)
+    if n and TASK_NAME[n] then return ("%d (%s)"):format(n, TASK_NAME[n]) end
+    return tostring(taskId)
+end
+
+function Projector.startObserve()
+    -- NOT `not type(x) == "function"` -- `not` binds tighter than `==` in
+    -- Lua, so that parses as `(not type(x)) == "function"`, which is always
+    -- false (type() never returns nil/false, so `not type(x)` is always
+    -- false) regardless of whether registerHandler actually exists. The
+    -- exact class of precedence trap test_regressions.lua already pins for
+    -- `and`-truncation; caught here before it shipped a second instance.
+    if type(registerHandler) ~= "function" then
+        log("registerHandler unavailable -- cannot observe")
+        return
+    end
+    if #Projector._handlers > 0 then
+        log("already observing -- call Projector.stopObserve() first to restart")
+        return
+    end
+
+    local function nameOf(character)
+        local ok, n = pcall(function() return character:getName() end)
+        return ok and n or "?"
+    end
+
+    local h1 = registerHandler("onCharacterAddJob", function(character, taskType, subject, shift, addDontClear, location)
+        log(("OBSERVED addJob: %s <- task %s  shift=%s addDontClear=%s")
+            :format(nameOf(character), taskLabel(taskType), tostring(shift), tostring(addDontClear)))
+    end)
+    local h2 = registerHandler("onCharacterAddOrder", function(character, destBuilding, taskType, subject, shift, clear, location)
+        log(("OBSERVED addOrder: %s <- task %s  shift=%s clear=%s")
+            :format(nameOf(character), taskLabel(taskType), tostring(shift), tostring(clear)))
+    end)
+    local h3 = registerHandler("onCharacterRemoveJob", function(character, taskType)
+        log(("OBSERVED removeJob: %s -x- task %s"):format(nameOf(character), taskLabel(taskType)))
+    end)
+    for _, h in ipairs({ h1, h2, h3 }) do
+        if h then Projector._handlers[#Projector._handlers + 1] = h end
+    end
+    log(("observing -- %d hook(s) armed. Go watch a farmer, a guard, anyone with a job. Every"):format(#Projector._handlers))
+    log("addJob/addOrder/removeJob the game's own AI performs will print here, with real task ids.")
+end
+
+function Projector.stopObserve()
+    if type(unregisterHandler) ~= "function" or #Projector._handlers == 0 then
+        log("not observing")
+        return
+    end
+    for _, hid in ipairs(Projector._handlers) do pcall(unregisterHandler, hid) end
+    Projector._handlers = {}
+    log("observation stopped")
+end
 
 -- ---------------------------------------------------------------------------
 -- PHASE 1 -- READ ONLY. Safe on any character, including the player.
@@ -112,12 +220,20 @@ function Projector.testGoal(taskName)
 end
 
 -- ---------------------------------------------------------------------------
--- PHASE 3 -- addJob / addOrder. HIGHEST RISK: the bindings doc and the real
--- C++ header disagree on argument shape (see SPINE.md). Tries the HEADER's
--- shape first (it is the primary source; the doc has 29+ confirmed wrong
--- signatures elsewhere in this project's own history), then the DOC's
--- shape, stopping at the first variant that does not error. Each attempt is
--- logged BEFORE it runs.
+-- PHASE 3 -- addJob / addOrder. HIGHEST RISK. Three variants, best evidence
+-- first:
+--   A. The CallbacksReference.md dispatcher shape (highest confidence --
+--      read directly off the compiled hook's own C++ signature, not a doc
+--      that has been wrong 29+ times elsewhere):
+--      addJob(task, subject, shift, addDontClear, location)
+--   B. The C++ AITaskSystem.h header (a plausible OTHER overload/wrapper
+--      layer): addJob(task, subject:hand, location, shift)
+--   C. The BindingsReference.md doc (already known to be missing the
+--      `subject` param entirely, kept only because "known wrong" still beats
+--      "untried"): addJob(task, shift, addDontClear, location)
+-- Stops at the first variant that does not error. Each attempt is logged
+-- BEFORE it runs -- pcall does not catch a native access violation, so the
+-- log is the only thing that survives a crash and names the killer.
 -- ---------------------------------------------------------------------------
 function Projector.testJobOrder(taskName)
     taskName = taskName or "WANDERER"
@@ -133,40 +249,41 @@ function Projector.testJobOrder(taskName)
     if not okPos then log("cannot read own position, aborting -- location arg would be a pure guess") return end
 
     -- selfHand may end up nil if getHandle fails; the `subject` argument's
-    -- real meaning for a targetless task like WANDERER/IDLE is unclear from
-    -- the header alone, so nil is a legitimate first guess, not a mistake.
+    -- real meaning for a targetless task like WANDERER/IDLE is unclear, so
+    -- nil is a legitimate first guess, not a mistake.
     local okHand, selfHand = pcall(function() return c:getHandle() end)
+    local subject = okHand and selfHand or nil
 
-    -- Variant A: the C++ HEADER's shape -- addJob(t, subject:hand, location, shift)
-    log("TRY A (header shape): c:addJob(" .. taskId .. ", <selfHandle>, <ownPos>, false)")
-    local okA, errA = pcall(function() c:addJob(taskId, okHand and selfHand or nil, pos, false) end)
-    log(("addJob variant A -> %s"):format(okA and "returned (no error)" or ("ERROR " .. tostring(errA))))
-    if okA then
-        log("Variant A returned cleanly. STOP HERE -- do not try further variants against this character.")
-        log("Watch the character now: did behavior actually change?")
-        log("========== END PHASE 3 (stopped after first clean variant) ==========")
-        return
-    end
+    local variants = {
+        { label = "A (CallbacksReference dispatcher shape -- try first, best evidence)",
+          call = function() c:addJob(taskId, subject, false, false, pos) end },
+        { label = "B (AITaskSystem.h header shape)",
+          call = function() c:addJob(taskId, subject, pos, false) end },
+        { label = "C (BindingsReference.md doc shape -- known incomplete, kept for completeness)",
+          call = function() c:addJob(taskId, false, false, pos) end },
+    }
 
-    -- Variant B: the DOC's shape -- addJob(t, shift, addDontClear, location)
-    log("TRY B (doc shape): c:addJob(" .. taskId .. ", false, false, <ownPos>)")
-    local okB, errB = pcall(function() c:addJob(taskId, false, false, pos) end)
-    log(("addJob variant B -> %s"):format(okB and "returned (no error)" or ("ERROR " .. tostring(errB))))
-    if okB then
-        log("Variant B returned cleanly. STOP HERE.")
-        log("Watch the character now: did behavior actually change?")
+    for _, v in ipairs(variants) do
+        log("TRY " .. v.label)   -- LOG-AS-CURSOR: printed BEFORE the call
+        local okV, errV = pcall(v.call)
+        log(("addJob variant -> %s"):format(okV and "returned (no error)" or ("ERROR " .. tostring(errV))))
+        if okV then
+            log("Returned cleanly. STOP HERE -- do not try further variants against this character.")
+            log("Watch the character now: did behavior actually change?")
+            log("========== END PHASE 3 (stopped after first clean variant) ==========")
+            return
+        end
     end
 
     log("========== END PHASE 3 ==========")
-    if not okA and not okB then
-        log("Both variants errored (not crashed). addJob's real shape is neither guess tried")
-        log("here -- record the ERROR text verbatim. KenshiLua's argument-error strings are")
-        log("how every other signature in this project's history got solved (see")
-        log("KENSHI-ENGINE-NOTES.md section 1 -- 'Docs argument columns are unreliable').")
-    end
+    log("All variants errored (not crashed). Record the ERROR text verbatim --")
+    log("KenshiLua's argument-error strings are how every other signature in this")
+    log("project's history got solved (KENSHI-ENGINE-NOTES.md section 1).")
 end
 
 log("27_projector_probe loaded.")
+log("  Projector.startObserve()           -- phase 0, always safe, any character, runs passively")
+log("  Projector.stopObserve()            -- turn phase 0 back off")
 log("  Projector.testRead()               -- phase 1, always safe, any character")
 log("  Projector.testGoal(taskName)       -- phase 2, select a DISPOSABLE character first")
 log("  Projector.testJobOrder(taskName)   -- phase 3, HIGHEST RISK, disposable character first")

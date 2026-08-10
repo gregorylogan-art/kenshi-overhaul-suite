@@ -169,6 +169,56 @@ and names the killer). See `mods/suite_scripts/scripts/27_projector_probe.lua`.
 Until this is run live and harvested back into this file, #28/#33/#34's
 "verified hooks" claim should be read as "found in a header," not "proven."
 
+### UPDATE 2026-08-10: found the real signature, and it's safer to test than feared
+
+Neither the doc nor the header check above had looked at
+`third_party/KenshiLua/docs/CallbacksReference.md` — a dedicated event-
+callback reference, separate from `BindingsReference.md` (methods/fields
+only), that nothing in this project had read yet. It resolves the addJob
+question with much higher confidence than either prior source, straight from
+the compiled hook's own C++ dispatcher signature:
+
+```
+void CallCharacterAddJobCallbacks(Character* character, int task,
+    RootObject* subject, bool shift, bool addDontClear, const Vector3& location)
+```
+
+i.e. the real call is **`addJob(task, subject, shift, addDontClear, location)`**.
+`BindingsReference.md`'s doc entry was not simply reordered — it was MISSING
+the `subject` parameter entirely, which is why any doc-shaped call was
+guaranteed to fail regardless of argument order. `27_projector_probe.lua`'s
+Phase 3 now tries this shape first (Variant A), then the AITaskSystem.h
+header's shape (Variant B, a plausible different overload), then the doc's
+incomplete shape last (Variant C, kept only because "known incomplete" still
+beats "untried").
+
+**Same reference also confirms `onCharacterAddJob`, `onCharacterAddOrder`,
+and `onCharacterRemoveJob` are real, and — critically — they are
+NOTIFICATION/OBSERVER hooks, not things we call.** They fire whenever ANY
+code, including the game's own vanilla AI, invokes the real
+addJob/addOrder/removeJob. That makes a genuinely zero-risk investigation
+possible that did not exist before: register these three hooks and watch
+what TaskType values the engine assigns to real NPCs during ordinary,
+unmodified play — e.g. watch a farmer for a few minutes and read the actual
+TaskType sequence behind the wheat loop off the log, instead of guessing at
+it from FCS. `Projector.startObserve()` / `.stopObserve()` in the same probe
+file. Cannot crash anything — it never calls into the engine, only reacts to
+what the engine already decided to do on its own.
+
+**Also worth checking against this same reference before trusting ANY other
+"verified hooks" claim in the open issues** — a spot-check across #26
+(`getWaterLevel`/`calculateSwimSpeed`), #29 (`onDialogueCheckCondition`), #31
+(`onPlayerStealCheck`/`onSmugglingTradeCheck`/`onGetFencingChance`/
+`stealthMode`/`_lightLevel`), and #32 (`isMySlave`/`isMyFactionsSlave`/
+`onCharacterFactionChanged`/`onCrimeWitnessed`) done 2026-08-10 found all of
+them real and present in `CallbacksReference.md` or the live probe run — so
+#34 was the one bad claim in the set, not a sign the others need the same
+correction. `isMySlave`/`isMyFactionsSlave` are a smaller, separate finding:
+`_probe_raw.txt` shows them erroring with "Character expected, got no
+value" — they are real methods that need an argument the zero-arg safe
+sweep never supplied, and the doc's `` (empty) argument column for them is
+therefore ALSO wrong, same failure class as addJob, just lower stakes.
+
 ## Danger list — never call these
 
 | Pattern | Why |
