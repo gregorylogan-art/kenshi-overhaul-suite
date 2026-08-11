@@ -124,9 +124,21 @@ local EVENT_LOG_EVERY  = 50    -- then a count-only line every N after that
 -- them at the same density as a normal event, so they get a much coarser
 -- interval instead of being quarantined outright (still want the running
 -- count from Observer.counts()).
+-- FOUND LIVE 2026-08-10 (fifth incident, ECON tag): onBuildingUseCheck
+-- registered CLEAN (this disproves the "boolean-style OVERRIDE checks crash
+-- on registration" hypothesis noted next to onBuildingIsForSale/onBuildingIsPublic
+-- below -- that pattern does not hold, corrected here rather than left wrong)
+-- but hit 1,700+ firings at the STANDARD 1-in-50 rate and then crashed with a
+-- FRESH dump: EXCEPTION_ACCESS_VIOLATION inside MyGUIEngine_x64.dll -- the
+-- SAME module as the TAVERN dialogue-hook crash, a second independent data
+-- point for the same shape (high-volume OVERRIDE-hook firing during
+-- UI/building-heavy play tipping a latent vanilla GUI-engine race). Same fix
+-- as TAVERN: throttle harder, do not quarantine -- the hook fires and
+-- registers fine, it is purely a logging-volume risk.
 local HYPER_HOT_EVERY = {
     onDialogueStartConversation = 2000,
     onDialogueCheckCondition    = 2000,
+    onBuildingUseCheck          = 2000,
 }
 
 local eventCounts = {}   -- ["tag:event"] = count, session-transient
@@ -203,7 +215,7 @@ local EVENTS = {
     { event = "onBuildingCalculateSaleValue",    tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onBuildingIsForSale",              tag = "ECON" },    -- OVERRIDE, direct hit on #50 -- skipped below, crashes on registerHandler (msvcr100.dll assert)
     { event = "onBuildingIsPublic",               tag = "ECON" },    -- OVERRIDE -- skipped below, crashes on registerHandler (2/2, no fresh dump, see the skip list)
-    { event = "onBuildingUseCheck",               tag = "ECON" },    -- OVERRIDE, logged read-only
+    { event = "onBuildingUseCheck",               tag = "ECON" },    -- OVERRIDE, hyper-hot (1-in-2000, see HYPER_HOT_EVERY) -- 1700+ fires crashed MyGUIEngine at the standard rate
     { event = "onPlatoonIBuyStolenGoods",        tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onPlatoonIBuyIllegalGoods",       tag = "ECON" },    -- OVERRIDE, logged read-only
 
@@ -286,14 +298,14 @@ local QUARANTINE = {
     -- signature (no fresh dump = not a clean native fault, see #32), not the
     -- onBuildingIsForSale assert signature -- so this may be a different
     -- failure mode that merely LOOKS identical at the log-as-cursor level.
-    -- NOTABLE PATTERN (unproven, worth testing before trusting): the two
-    -- hooks that have now died on registration -- onBuildingIsForSale and
-    -- onBuildingIsPublic -- are both boolean-style "is this true?" OVERRIDE
-    -- checks, while onBuildingCalculateSaleValue (numeric-return OVERRIDE)
-    -- registered fine right before both. onBuildingUseCheck (ECON, also
-    -- reads as boolean-style) has not been tried yet -- worth testing SOLO
-    -- via Observer.startOne("onBuildingUseCheck"), not via startTag, before
-    -- trusting a third full ECON run.
+    -- CORRECTED 2026-08-10: this entry originally floated a "boolean-style
+    -- OVERRIDE checks crash on registration" hypothesis and suggested testing
+    -- onBuildingUseCheck solo to check it. That test ran -- onBuildingUseCheck
+    -- (also boolean-style) registered completely clean and ran to 1,700+
+    -- firings before crashing on VOLUME, not registration (see HYPER_HOT_EVERY
+    -- above). The hypothesis does not hold; two hooks landing on the same
+    -- registration-crash symptom does not mean they share a cause. Left
+    -- uncorrected this would have misdirected the next hook investigated.
     "onBuildingIsPublic",
 }
 local function quarantined(name)
@@ -425,3 +437,8 @@ log("ended in a real MyGUIEngine_x64.dll access violation (fresh crash dump, not
 log("hang -- see read_crashdump.py). Both hooks are now throttled to 1-in-2000, but")
 log("prefer 1x speed and avoid stacking trade/hire UI with heavy dialogue when")
 log("re-running TAVERN.")
+log("CAUTION: ECON's onBuildingUseCheck crashed the SAME way (MyGUIEngine_x64.dll,")
+log("fresh dump) at 1700+ fires under the standard rate -- now throttled to")
+log("1-in-2000 too. onBuildingIsForSale/onBuildingIsPublic are quarantined outright")
+log("(crash on registerHandler itself, before ever firing) -- startTag(\"ECON\") skips")
+log("them and logs the skip.")
