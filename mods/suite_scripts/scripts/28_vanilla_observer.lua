@@ -202,7 +202,7 @@ local EVENTS = {
     { event = "onItemGetValueSingle",            tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onBuildingCalculateSaleValue",    tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onBuildingIsForSale",              tag = "ECON" },    -- OVERRIDE, direct hit on #50 -- skipped below, crashes on registerHandler (msvcr100.dll assert)
-    { event = "onBuildingIsPublic",               tag = "ECON" },    -- OVERRIDE, logged read-only
+    { event = "onBuildingIsPublic",               tag = "ECON" },    -- OVERRIDE -- skipped below, crashes on registerHandler (2/2, no fresh dump, see the skip list)
     { event = "onBuildingUseCheck",               tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onPlatoonIBuyStolenGoods",        tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onPlatoonIBuyIllegalGoods",       tag = "ECON" },    -- OVERRIDE, logged read-only
@@ -273,6 +273,28 @@ local QUARANTINE = {
     -- strategy (Projector-style single-purpose probe, not bulk Observer) or
     -- confirmation from KenshiLua's own source before retrying live.
     "onBuildingIsForSale",
+
+    -- FOUND LIVE 2026-08-10 (fourth incident, ECON tag, reproduced 2/2):
+    -- with onBuildingIsForSale correctly (if silently -- see the startTag
+    -- fix above) skipped, the very next ECON registration -- onBuildingIsPublic
+    -- -- died the identical way: log ends on "REGISTERING: onBuildingIsPublic"
+    -- with no "registered -> ok". Reproduced twice in the same fresh Kenshi
+    -- session, same exact stopping point both times. UNLIKE onBuildingIsForSale,
+    -- read_crashdump.py found NO new dump either time -- still the OLD
+    -- 17:37:22 dump from the onBuildingIsForSale incident, over 2 hours stale
+    -- against a session that started at 19:57. That is the SLAVE-tag hang
+    -- signature (no fresh dump = not a clean native fault, see #32), not the
+    -- onBuildingIsForSale assert signature -- so this may be a different
+    -- failure mode that merely LOOKS identical at the log-as-cursor level.
+    -- NOTABLE PATTERN (unproven, worth testing before trusting): the two
+    -- hooks that have now died on registration -- onBuildingIsForSale and
+    -- onBuildingIsPublic -- are both boolean-style "is this true?" OVERRIDE
+    -- checks, while onBuildingCalculateSaleValue (numeric-return OVERRIDE)
+    -- registered fine right before both. onBuildingUseCheck (ECON, also
+    -- reads as boolean-style) has not been tried yet -- worth testing SOLO
+    -- via Observer.startOne("onBuildingUseCheck"), not via startTag, before
+    -- trusting a third full ECON run.
+    "onBuildingIsPublic",
 }
 local function quarantined(name)
     for _, q in ipairs(QUARANTINE) do if q == name then return true end end
@@ -349,7 +371,14 @@ function Observer.startTag(wantTag)
     end
     local n = 0
     for _, e in ipairs(EVENTS) do
-        if e.tag == wantTag and not quarantined(e.event) then
+        if e.tag == wantTag and quarantined(e.event) then
+            -- FOUND LIVE 2026-08-10 (fourth incident): this branch used to
+            -- skip silently, no log line at all -- so a quarantined event's
+            -- absence from the log was indistinguishable from "never reached
+            -- it because something before it crashed." Observer.start() always
+            -- logged its skips; startTag() did not. Fixed to match.
+            log("SKIP (quarantined): " .. e.event)
+        elseif e.tag == wantTag then
             log("REGISTERING: " .. e.event)
             local ok, hid = pcall(registerHandler, e.event, makeObserverHandler(e))
             if ok and hid then
