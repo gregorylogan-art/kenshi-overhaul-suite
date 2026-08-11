@@ -131,14 +131,12 @@ local EVENT_LOG_EVERY  = 50    -- then a count-only line every N after that
 -- but hit 1,700+ firings at the STANDARD 1-in-50 rate and then crashed with a
 -- FRESH dump: EXCEPTION_ACCESS_VIOLATION inside MyGUIEngine_x64.dll -- the
 -- SAME module as the TAVERN dialogue-hook crash, a second independent data
--- point for the same shape (high-volume OVERRIDE-hook firing during
--- UI/building-heavy play tipping a latent vanilla GUI-engine race). Same fix
--- as TAVERN: throttle harder, do not quarantine -- the hook fires and
--- registers fine, it is purely a logging-volume risk.
+-- point for the same shape. Originally throttled to 1-in-2000 here (see the
+-- sixth-incident note in QUARANTINE below for why that was not enough and
+-- the hook moved to the skip list instead).
 local HYPER_HOT_EVERY = {
     onDialogueStartConversation = 2000,
     onDialogueCheckCondition    = 2000,
-    onBuildingUseCheck          = 2000,
 }
 
 local eventCounts = {}   -- ["tag:event"] = count, session-transient
@@ -215,7 +213,7 @@ local EVENTS = {
     { event = "onBuildingCalculateSaleValue",    tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onBuildingIsForSale",              tag = "ECON" },    -- OVERRIDE, direct hit on #50 -- skipped below, crashes on registerHandler (msvcr100.dll assert)
     { event = "onBuildingIsPublic",               tag = "ECON" },    -- OVERRIDE -- skipped below, crashes on registerHandler (2/2, no fresh dump, see the skip list)
-    { event = "onBuildingUseCheck",               tag = "ECON" },    -- OVERRIDE, hyper-hot (1-in-2000, see HYPER_HOT_EVERY) -- 1700+ fires crashed MyGUIEngine at the standard rate
+    { event = "onBuildingUseCheck",               tag = "ECON" },    -- OVERRIDE -- skipped below, 576,000+ fire ambient poll crashed MyGUIEngine even throttled
     { event = "onPlatoonIBuyStolenGoods",        tag = "ECON" },    -- OVERRIDE, logged read-only
     { event = "onPlatoonIBuyIllegalGoods",       tag = "ECON" },    -- OVERRIDE, logged read-only
 
@@ -307,6 +305,32 @@ local QUARANTINE = {
     -- registration-crash symptom does not mean they share a cause. Left
     -- uncorrected this would have misdirected the next hook investigated.
     "onBuildingIsPublic",
+
+    -- FOUND LIVE 2026-08-10 (sixth incident, ECON tag): the 1-in-2000
+    -- throttle above was NOT enough. onBuildingUseCheck hit 576,000 firings
+    -- in one session -- over 300x the 1,700 that crashed it at the standard
+    -- 1-in-50 rate, and over 20x the ~26,500 that crashed the TAVERN
+    -- dialogue hooks -- and crashed again, same fresh-dump signature
+    -- (EXCEPTION_ACCESS_VIOLATION, MyGUIEngine_x64.dll). Greg's read was
+    -- "crashed as soon as I tried to sell something," but the log-as-cursor
+    -- trail shows plain onBuildingUseCheck count lines right up to the cutoff
+    -- -- no onItemGetValueSingle (the sell-path event) anywhere near the end
+    -- -- so the timing looks coincidental: cumulative call volume crossing
+    -- some threshold right as he happened to click sell, not the sell action
+    -- itself triggering the fault.
+    --
+    -- The TAVERN throttle fix worked because those hooks are bounded by a
+    -- real user action (a dialogue/trade window being open). onBuildingUseCheck
+    -- is different -- 576,000 firings implies an ambient per-tick poll across
+    -- nearby buildings that scales with TIME SPENT NEAR TOWN, not with
+    -- anything the player deliberately does. No sample-rate interval fixes
+    -- that: cutting the LOG line count by 2000x does nothing about the
+    -- 576,000 native-to-Lua CALL crossings still happening underneath, and
+    -- that raw call volume -- not I/O -- is the more likely overhead source
+    -- tipping MyGUIEngine over. Confirmed signature is already known
+    -- (onBuildingUseCheck(Ownerships, Building, nil)) -- moved here instead
+    -- of re-tuning the throttle a second time.
+    "onBuildingUseCheck",
 }
 local function quarantined(name)
     for _, q in ipairs(QUARANTINE) do if q == name then return true end end
@@ -438,7 +462,9 @@ log("hang -- see read_crashdump.py). Both hooks are now throttled to 1-in-2000, 
 log("prefer 1x speed and avoid stacking trade/hire UI with heavy dialogue when")
 log("re-running TAVERN.")
 log("CAUTION: ECON's onBuildingUseCheck crashed the SAME way (MyGUIEngine_x64.dll,")
-log("fresh dump) at 1700+ fires under the standard rate -- now throttled to")
-log("1-in-2000 too. onBuildingIsForSale/onBuildingIsPublic are quarantined outright")
-log("(crash on registerHandler itself, before ever firing) -- startTag(\"ECON\") skips")
-log("them and logs the skip.")
+log("fresh dump) twice -- once at 1700+ fires under the standard rate, again at")
+log("576000+ fires even throttled to 1-in-2000. It is an ambient per-tick poll near")
+log("buildings, not bounded by a user action, so no sample rate fixes it -- now")
+log("quarantined outright, same as onBuildingIsForSale/onBuildingIsPublic (which")
+log("crash on registerHandler itself, before ever firing). startTag(\"ECON\") skips")
+log("all three and logs each skip.")
