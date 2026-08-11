@@ -251,6 +251,19 @@ session) — not a crash, but real overhead. `28_vanilla_observer.lua` now
 rate-limits after the first 3 occurrences of each event to a periodic count
 line; `Observer.counts()` gives the full tally regardless.
 
+## VERIFIED live 2026-08-11: Character:relocationTeleport works, real unstuck fix
+
+`Character:relocationTeleport(moveBy: Vector3)` — first live call, confirmed
+working. `Vector3` in this binding is a plain Lua table (`{x=.., y=.., z=..}`,
+matches `CallbacksReference.md`'s own `setHoldLocation` note calling its
+Vector3 arg a "vector3Table" — no dedicated Vector3 userdata class exists in
+`BindingsReference.md`). `moveBy` is a **relative offset**, not an absolute
+position, matching the parameter name — a small vertical nudge
+(`{x=0, y=0, z=300}`) on `getSelectedCharacter()` is a working practical fix
+for an NPC stuck in geometry, no need to know their target coordinates.
+`Character` also exposes `teleport(moveBy: Vector3, rot: Quaternion)` (same
+class, untried) if a relative move alone is not enough.
+
 ## Danger list — never call these
 
 | Pattern | Why |
