@@ -306,6 +306,18 @@ produced no visible change. Next step for a clean signal: retest on an
 actual disposable, non-player-controlled NPC (the probe's original design
 target) where there is no competing input to mask the result either way.
 
+**Retested 2026-08-12 on a disposable NPC — still no visible change,** but
+now the player-input confound is gone (5 back-to-back calls, all clean:
+"returned (no error)" x5, zero crash, zero hang — the write path is
+demonstrably reliable across repeats). IDLE's design point of looking close
+to doing nothing cuts both ways: great for confirming this call causes no
+harm, bad for confirming it causes anything at all. A "no visible change"
+result on a task specifically designed to be invisible is weak evidence
+either way. Next step: retest with `WANDERER` (task 24) instead — still one
+of the two lowest-consequence tasks in the enum, but should produce an
+unmistakable visible effect (the NPC should start walking somewhere) if
+`addGoal` genuinely drives behavior end-to-end.
+
 `addJob`'s `subject` parameter (Phase 3, `CallbacksReference.md`'s dispatcher
 shape) has NOT been retested against this same `RootObjectBase` unwrap yet —
 it currently passes the raw `hand` from `getHandle()`, the same shape that
