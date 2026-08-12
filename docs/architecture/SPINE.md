@@ -382,6 +382,29 @@ deploy) — the log's own variant labels gave it away (old wording, not the
 newly-edited text), which is why label text doubles as a version check, not
 just documentation.
 
+**MILESTONE, 2026-08-12 — first confirmed behavioral effect from any
+Projector write call.** Retested with the fix live: `addJob(24=WANDERER,
+subject:RootObject, false, false, pos)` via corrected Variant A returned
+clean (zero error, zero crash, dump timestamp unchanged) — AND this time
+something real happened. The character (sitting) was interrupted, stood up,
+and talked. A genuine state transition, not a hitch or silence. This is
+qualitatively different from every `addGoal` result above: across three
+targets and two tasks, `addGoal` never once interrupted existing behavior;
+`addJob` did, on the first clean attempt with the right subject type. Real
+evidence `addJob` carries command authority `addGoal` does not.
+
+Same caveat as the earlier `addGoal` retests applies here too: this was on
+Dreadnaut (Greg's own squad member), not a fully independent NPC, so the
+squad-authority question isn't settled — worth one more retest on a truly
+independent target (the bonedog shape) to fully close it out. The specific
+resulting behavior (talking, not literally walking to a WANDERER
+destination) most likely means the call broke the character out of its
+sitting state and its own AI then picked the next action, rather than the
+engine obeying the WANDERER destination directly — plausible, not proven.
+Either way, this answers the probe's original headline question in the
+affirmative for the first time: **Lua can drive a character through a real,
+observable behavior change via `addJob`.**
+
 ## Danger list — never call these
 
 | Pattern | Why |
