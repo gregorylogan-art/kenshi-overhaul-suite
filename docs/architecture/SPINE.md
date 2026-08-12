@@ -264,6 +264,43 @@ for an NPC stuck in geometry, no need to know their target coordinates.
 `Character` also exposes `teleport(moveBy: Vector3, rot: Quaternion)` (same
 class, untried) if a relative move alone is not enough.
 
+## VERIFIED live 2026-08-12: addGoal's real signature — first working write
+
+**Resolves the biggest open question in `27_projector_probe.lua`'s header:
+can Lua actually drive a character through a task, or was "verified hooks"
+in #28/#33/#34/#46/#49 just a doc claim never run?** First confirmed-working
+write call:
+
+```
+character:addGoal(taskId, character:getHandle():getRootObjectBase())
+```
+
+`BindingsReference.md` documents `addGoal(t: integer)` as single-arg — wrong,
+same failure class as `addJob`'s missing `subject` param and
+`onCharacterEquip`'s swapped arg order (three confirmed instances of this
+project's one recurring doc failure mode now). The real binding requires a
+second `RootObjectBase`-typed argument. `getHandle()` alone is NOT enough —
+it returns a `hand`, a different type, and errors
+`"RootObjectBase expected, got userdata"`. The working chain unwraps one
+level further: `Character:getHandle()` → `hand` → `hand:getRootObjectBase()`
+→ `RootObjectBase`, which `addGoal` accepts. `nil` (both omitted and
+explicit) is rejected outright — a real subject object is mandatory, no nil
+shortcut for a targetless task like IDLE.
+
+Tested live on the **player character** (with a fresh save as the safety
+net, not a disposable NPC — the probe's own default caution). Call itself
+returns cleanly with zero error and zero crash. Whether `addGoal(IDLE, ...)`
+produced any *observable* behavior change is a separate, still-open
+question — the call succeeding is proof the write path itself works, not
+yet proof of what it visibly does.
+
+`addJob`'s `subject` parameter (Phase 3, `CallbacksReference.md`'s dispatcher
+shape) has NOT been retested against this same `RootObjectBase` unwrap yet —
+it currently passes the raw `hand` from `getHandle()`, the same shape that
+just proved wrong for `addGoal`. Worth trying the same
+`getHandle():getRootObjectBase()` unwrap there before trusting Phase 3's
+current variants.
+
 ## Danger list — never call these
 
 | Pattern | Why |
