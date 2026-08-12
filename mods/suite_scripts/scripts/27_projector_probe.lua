@@ -248,13 +248,27 @@ end
 -- `subject` param and onCharacterEquip's swapped arg order. The real binding
 -- errors cleanly: "bad argument #2 to 'addGoal' (KenshiLua.RootObjectBase
 -- expected, got no value)" -- a second RootObjectBase-typed arg is required.
--- Two variants, best guess first, same shape as Phase 3's addJob variants:
+-- FOUND LIVE 2026-08-12, round 2: both A and B above (this file's own prior
+-- guesses) errored too, but with genuinely different, informative text --
+-- "expected, got nil" for A (proves nil is rejected in BOTH omitted and
+-- explicit form, not just omitted) and "expected, got userdata" for B
+-- (proves getHandle() DOES return a real object, just the wrong TYPE -- a
+-- `hand`, not a `RootObjectBase`). BindingsReference.md confirms `hand` has
+-- its own `getRootObjectBase()` method (`## hand` section) -- the unwrap
+-- Character -> getHandle() -> hand -> getRootObjectBase() -> RootObjectBase
+-- is the natural next guess, now Variant C below.
+--
+-- Three variants, best guess first:
 --   A. subject = nil (explicit) -- KenshiLua's arg-count check distinguishes
 --      "argument omitted" from "argument explicitly nil" (the very error we
---      hit came from OMITTING it entirely), so passing nil explicitly is a
---      different, untested case, not a repeat of the same failure.
---   B. subject = the character's own handle (mirrors Phase 3's `subject`
---      guess for a targetless task like IDLE/WANDERER).
+--      hit came from OMITTING it entirely), so passing nil explicitly was a
+--      different, untested case, not a repeat of the same failure. CONFIRMED
+--      WRONG 2026-08-12 -- kept for completeness, not because it might work.
+--   B. subject = the character's own handle. CONFIRMED WRONG 2026-08-12 --
+--      right idea (mirrors Phase 3's `subject` guess), wrong TYPE.
+--   C. subject = the character's own handle's RootObjectBase (the type the
+--      engine actually asked for, traced from the BindingsReference.md
+--      `hand` class -- highest confidence of the three).
 -- ---------------------------------------------------------------------------
 function Projector.testGoal(taskName)
     taskName = taskName or "IDLE"
@@ -267,11 +281,17 @@ function Projector.testGoal(taskName)
     log(("========== PROJECTOR PHASE 2: addGoal(%s=%d) on %s =========="):format(taskName, taskId, tostring(okN and name or "?")))
 
     local okHand, selfHand = pcall(function() return c:getHandle() end)
+    local okRoot, selfRoot = false, nil
+    if okHand and selfHand then
+        okRoot, selfRoot = pcall(function() return selfHand:getRootObjectBase() end)
+    end
     local variants = {
         { label = "A (subject=nil, explicit)",
           call = function() c:addGoal(taskId, nil) end },
         { label = "B (subject=own handle)",
           call = function() c:addGoal(taskId, okHand and selfHand or nil) end },
+        { label = "C (subject=own handle:getRootObjectBase())",
+          call = function() c:addGoal(taskId, okRoot and selfRoot or nil) end },
     }
 
     for _, v in ipairs(variants) do
