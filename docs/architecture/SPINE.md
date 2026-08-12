@@ -344,12 +344,28 @@ retest to settle whether the lack of a lasting change is `addGoal` being
 overridden by squad/player command authority, or `addGoal` genuinely not
 producing persistent behavior change on its own.
 
+**Genuinely independent NPC retest, 2026-08-12 — clean signal, still nothing.**
+`addGoal(24=WANDERER, ...)` on a wild bonedog (zero squad/player relationship
+of any kind — the cleanest target possible for ruling out command-authority
+confounds): no crash, no observable change of any kind, not even the frame
+hitch seen on the squad-member retest. Across three meaningfully different
+targets now (player, squad member, independent wildlife) and two tasks
+(IDLE, WANDERER), `addGoal` has never produced one confirmed lasting
+behavioral effect, despite the write path itself being completely reliable
+(every call returns clean, zero errors after the signature fix, zero
+crashes across ~10+ live calls total). This is starting to look like a real
+property of `addGoal` rather than a confound — plausibly a low-priority
+suggestion the character's own AI can silently ignore/override every tick,
+rather than a direct behavioral command. `addJob` (Phase 3, takes an
+explicit `location` argument) is the next candidate — a much more forceful,
+directly observable command shape if it works.
+
 `addJob`'s `subject` parameter (Phase 3, `CallbacksReference.md`'s dispatcher
-shape) has NOT been retested against this same `RootObjectBase` unwrap yet —
-it currently passes the raw `hand` from `getHandle()`, the same shape that
-just proved wrong for `addGoal`. Worth trying the same
-`getHandle():getRootObjectBase()` unwrap there before trusting Phase 3's
-current variants.
+shape) was, until now, untested against this same `RootObjectBase` unwrap —
+it passed the raw `hand` from `getHandle()`, the same shape that proved
+wrong for `addGoal`. Fixed in `27_projector_probe.lua` (`f3458e1`): a new
+Variant A tries the `RootObjectBase` unwrap first, ahead of the three
+original variants (now B/C/D).
 
 ## Danger list — never call these
 
