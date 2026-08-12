@@ -344,21 +344,28 @@ retest to settle whether the lack of a lasting change is `addGoal` being
 overridden by squad/player command authority, or `addGoal` genuinely not
 producing persistent behavior change on its own.
 
-**Genuinely independent NPC retest, 2026-08-12 — clean signal, still nothing.**
-`addGoal(24=WANDERER, ...)` on a wild bonedog (zero squad/player relationship
-of any kind — the cleanest target possible for ruling out command-authority
-confounds): no crash, no observable change of any kind, not even the frame
-hitch seen on the squad-member retest. Across three meaningfully different
-targets now (player, squad member, independent wildlife) and two tasks
-(IDLE, WANDERER), `addGoal` has never produced one confirmed lasting
-behavioral effect, despite the write path itself being completely reliable
-(every call returns clean, zero errors after the signature fix, zero
-crashes across ~10+ live calls total). This is starting to look like a real
-property of `addGoal` rather than a confound — plausibly a low-priority
-suggestion the character's own AI can silently ignore/override every tick,
-rather than a direct behavioral command. `addJob` (Phase 3, takes an
-explicit `location` argument) is the next candidate — a much more forceful,
-directly observable command shape if it works.
+**"Genuinely independent NPC" retest, 2026-08-12 — CORRECTION, this was not
+actually independent.** Originally logged as `addGoal(24=WANDERER, ...)` on
+a wild bonedog with zero squad/player relationship. That was wrong: every
+target in this whole investigation, including the bonedog, went through
+`getSelectedCharacter()`, which reads `PlayerInterface.selectedCharacter` —
+Kenshi's SQUAD ROSTER selection, not a world click-target (see the dedicated
+correction entry further down). Clicking an arbitrary NPC does not set that
+property; only selecting one of the player's own characters does, and a
+tamed animal counts as squad. The bonedog was therefore very likely a tamed
+pet in Greg's own squad, not independent wildlife — the control-authority
+question these three "targets" were meant to settle was never actually
+tested. Left the original result below for the record (no crash, no
+observable change, matches the pattern), but its "genuinely independent"
+framing does not hold.
+
+Across three attempted targets (player, squad member, presumed-but-unproven
+independent) and two tasks (IDLE, WANDERER), `addGoal` never produced one
+confirmed lasting behavioral effect, despite the write path itself being
+completely reliable (every call returns clean, zero errors after the
+signature fix, zero crashes across ~10+ live calls total). `addJob` (Phase
+3, takes an explicit `location` argument) is the next candidate — a much
+more forceful, directly observable command shape if it works.
 
 `addJob`'s `subject` parameter (Phase 3, `CallbacksReference.md`'s dispatcher
 shape) was, until now, untested against this same `RootObjectBase` unwrap —
@@ -404,6 +411,32 @@ engine obeying the WANDERER destination directly — plausible, not proven.
 Either way, this answers the probe's original headline question in the
 affirmative for the first time: **Lua can drive a character through a real,
 observable behavior change via `addJob`.**
+
+## FOUND LIVE 2026-08-12: getSelectedCharacter() can only ever return squad
+
+`getSelectedCharacter()` reads `PlayerInterface.selectedCharacter`
+(`BindingsReference.md` line ~7237: `selectedCharacter | hand | RW`), which
+is Kenshi's **squad roster selection** — whichever of the player's own
+characters is currently active — not a world click-target. Clicking an
+arbitrary townsperson in the world does not set this property; only
+selecting one of the player's own characters does (a tamed animal counts as
+squad). Every Phase 1/2/3 test run through this getter, all session,
+targeted a squad member, no exceptions, regardless of what was actually
+clicked in the world. This invalidates the "genuinely independent NPC"
+framing applied to several earlier results above (see the bonedog
+correction) — the squad/command-authority confound was never actually
+eliminated by any test run before this fix.
+
+**Fix (`07f4c59`):** Phase 0's notification hooks (`onCharacterAddJob` /
+`onCharacterAddOrder` / `onCharacterRemoveJob`) already receive a live
+`character` argument for ANY character the game's own AI acts on, squad or
+not. `startObserve()` now stashes the most recently observed one in
+`Projector._lastObserved`; `Projector.lastObserved()` reports who;
+`testGoal`/`testJobOrder` take a new optional second argument — pass `true`
+to target the capture instead of `getSelectedCharacter()`. This is the
+first actual path to a genuinely independent-NPC test in this whole
+investigation. Not yet exercised live — next retest should use it to
+finally settle the squad-authority question cleanly.
 
 ## Danger list — never call these
 
