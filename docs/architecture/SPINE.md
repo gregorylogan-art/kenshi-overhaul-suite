@@ -289,10 +289,22 @@ shortcut for a targetless task like IDLE.
 
 Tested live on the **player character** (with a fresh save as the safety
 net, not a disposable NPC — the probe's own default caution). Call itself
-returns cleanly with zero error and zero crash. Whether `addGoal(IDLE, ...)`
-produced any *observable* behavior change is a separate, still-open
-question — the call succeeding is proof the write path itself works, not
-yet proof of what it visibly does.
+returns cleanly with zero error and zero crash.
+
+**Behavioral result: no observable effect.** The player character had been
+running before the call and kept running through it, uninterrupted — despite
+IDLE (task 14) being the lowest-consequence task in the enum specifically
+because a character told to idle is supposed to look close to doing nothing,
+not literally identical to whatever it was already doing. This does NOT mean
+`addGoal` is a no-op — it's confounded by testing on a player-POSSESSED
+character, where held movement input very plausibly re-asserts every frame
+and masks any AI-goal effect regardless of whether the goal was actually
+applied underneath. The call executing cleanly is real evidence the write
+path works; this specific result says nothing new about whether AI goals
+route around active player input, only that IDLE-while-actively-running
+produced no visible change. Next step for a clean signal: retest on an
+actual disposable, non-player-controlled NPC (the probe's original design
+target) where there is no competing input to mask the result either way.
 
 `addJob`'s `subject` parameter (Phase 3, `CallbacksReference.md`'s dispatcher
 shape) has NOT been retested against this same `RootObjectBase` unwrap yet —
