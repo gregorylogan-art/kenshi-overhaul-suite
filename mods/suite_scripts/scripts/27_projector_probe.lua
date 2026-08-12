@@ -40,8 +40,12 @@
 --   1. READ-ONLY. getPermajobCount()/getPermajob() on the selected character.
 --      Zero-arg or int-slot getters only -- no more risk than any other
 --      verified getter already in daily use.
---   2. SINGLE-ARG WRITE. addGoal(TaskType) -- 1 int, and the doc and header
---      AGREE on this one's shape, so it is the safest write to try first.
+--   2. TWO-ARG WRITE. addGoal(TaskType, subject) -- doc and header both
+--      claimed 1 int arg; FOUND LIVE 2026-08-12 that is wrong too, same
+--      failure class as addJob's missing `subject` below. Real binding
+--      requires a second RootObjectBase-typed arg (confirmed via the
+--      engine's own argument-error text). Still the safest write to try
+--      first -- fewer args and less ambiguity than addJob/addOrder.
 --   3. MULTI-ARG WRITE. addJob/addOrder -- HIGHEST RISK. Every variant is
 --      wrapped in pcall AND logged BEFORE the call, because pcall does NOT
 --      catch a native access violation -- if this crashes the game, the log
@@ -238,10 +242,19 @@ function Projector.testRead()
 end
 
 -- ---------------------------------------------------------------------------
--- PHASE 2 -- addGoal(TaskType). 1 int arg; doc and header AGREE on this
--- signature (unlike addJob/addOrder below), so this is the safest write to
--- try first. If this does nothing observable, that is a clean, uninformative
--- result -- not a crash, and still worth knowing.
+-- PHASE 2 -- addGoal(TaskType, subject). FOUND LIVE 2026-08-12:
+-- BindingsReference.md documents this as a 1-int-arg call, `addGoal(t)`, and
+-- the header agreed -- both wrong, same failure class as addJob's missing
+-- `subject` param and onCharacterEquip's swapped arg order. The real binding
+-- errors cleanly: "bad argument #2 to 'addGoal' (KenshiLua.RootObjectBase
+-- expected, got no value)" -- a second RootObjectBase-typed arg is required.
+-- Two variants, best guess first, same shape as Phase 3's addJob variants:
+--   A. subject = nil (explicit) -- KenshiLua's arg-count check distinguishes
+--      "argument omitted" from "argument explicitly nil" (the very error we
+--      hit came from OMITTING it entirely), so passing nil explicitly is a
+--      different, untested case, not a repeat of the same failure.
+--   B. subject = the character's own handle (mirrors Phase 3's `subject`
+--      guess for a targetless task like IDLE/WANDERER).
 -- ---------------------------------------------------------------------------
 function Projector.testGoal(taskName)
     taskName = taskName or "IDLE"
@@ -253,12 +266,28 @@ function Projector.testGoal(taskName)
     local okN, name = pcall(function() return c:getName() end)
     log(("========== PROJECTOR PHASE 2: addGoal(%s=%d) on %s =========="):format(taskName, taskId, tostring(okN and name or "?")))
 
-    log("TRY: c:addGoal(" .. taskId .. ")")   -- LOG-AS-CURSOR: printed BEFORE the call
-    local okCall, err = pcall(function() c:addGoal(taskId) end)
-    log(("addGoal(%d) -> %s"):format(taskId, okCall and "returned (no error)" or ("ERROR " .. tostring(err))))
-    log("If the game is still running and this line printed, the call did not hard-crash.")
-    log("Now WATCH the character for the next several seconds: did behavior change at all?")
+    local okHand, selfHand = pcall(function() return c:getHandle() end)
+    local variants = {
+        { label = "A (subject=nil, explicit)",
+          call = function() c:addGoal(taskId, nil) end },
+        { label = "B (subject=own handle)",
+          call = function() c:addGoal(taskId, okHand and selfHand or nil) end },
+    }
+
+    for _, v in ipairs(variants) do
+        log("TRY " .. v.label .. ": c:addGoal(" .. taskId .. ", ...)")   -- LOG-AS-CURSOR: printed BEFORE the call
+        local okCall, err = pcall(v.call)
+        log(("addGoal variant -> %s"):format(okCall and "returned (no error)" or ("ERROR " .. tostring(err))))
+        if okCall then
+            log("Returned cleanly. STOP HERE.")
+            log("Now WATCH the character for the next several seconds: did behavior change at all?")
+            log("========== END PHASE 2 (stopped after first clean variant) ==========")
+            return
+        end
+    end
+
     log("========== END PHASE 2 ==========")
+    log("All variants errored (not crashed). Record the ERROR text verbatim.")
 end
 
 -- ---------------------------------------------------------------------------
