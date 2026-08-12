@@ -306,6 +306,19 @@ produced no visible change. Next step for a clean signal: retest on an
 actual disposable, non-player-controlled NPC (the probe's original design
 target) where there is no competing input to mask the result either way.
 
+**CORRECTION 2026-08-12:** the two retests below were described as "on a
+disposable NPC" — wrong. Greg confirmed both were actually still one of his
+own controlled main characters (a squad member), not an independent
+townsperson going about autonomous vanilla AI business. That means neither
+result actually eliminated the control confound noted above — a squad
+member is still plausibly player-adjacent (squad orders / player command
+authority), just one level removed from direct WASD input. Left the
+original wording below uncorrected-in-place (matches this project's own
+practice of flagging a wrong claim rather than silently rewriting history),
+but treat both "no visible change on a disposable NPC" claims as UNPROVEN
+until retested on a genuinely independent NPC (a random townsperson/guard
+with zero squad relationship) — the probe's real original design target.
+
 **Retested 2026-08-12 on a disposable NPC — still no visible change,** but
 now the player-input confound is gone (5 back-to-back calls, all clean:
 "returned (no error)" x5, zero crash, zero hang — the write path is
@@ -317,6 +330,19 @@ either way. Next step: retest with `WANDERER` (task 24) instead — still one
 of the two lowest-consequence tasks in the enum, but should produce an
 unmistakable visible effect (the NPC should start walking somewhere) if
 `addGoal` genuinely drives behavior end-to-end.
+
+**WANDERER retest, same confound:** `addGoal(24=WANDERER, ...)` returned
+clean, zero error, zero crash (dump timestamp unchanged). Real side effect
+observed: a genuine frame drop/game-wide slowdown at the moment of the
+call — not a crash, but real engine cost, plausibly the game synchronously
+computing a destination + nav path for the wander task. That is meaningful
+corroborating evidence the call engaged real AI/pathfinding machinery
+(unlike IDLE's total silence), independent of the control-confound question.
+After the hitch passed, the character just continued what it was already
+doing — no lasting behavior change. Still needs a genuinely independent NPC
+retest to settle whether the lack of a lasting change is `addGoal` being
+overridden by squad/player command authority, or `addGoal` genuinely not
+producing persistent behavior change on its own.
 
 `addJob`'s `subject` parameter (Phase 3, `CallbacksReference.md`'s dispatcher
 shape) has NOT been retested against this same `RootObjectBase` unwrap yet —
