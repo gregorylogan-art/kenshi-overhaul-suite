@@ -313,24 +313,27 @@ end
 -- ---------------------------------------------------------------------------
 -- PHASE 3 -- addJob / addOrder. HIGHEST RISK. Four variants, best evidence
 -- first:
---   A. FOUND LIVE 2026-08-12 (addGoal precedent) -- the CallbacksReference.md
---      dispatcher shape, but with `subject` unwrapped the same way that
---      fixed addGoal: Character:getHandle() -> hand -> hand:getRootObjectBase()
---      -> RootObjectBase. addGoal's raw `hand` errored "RootObjectBase
---      expected, got userdata"; the ORIGINAL variant B below passes that same
---      raw hand into addJob and has never actually been confirmed to accept
---      it -- if addJob wants RootObjectBase too (both dispatcher signatures
---      name a `subject`/`RootObject*` argument, plausibly the same family),
---      this is the highest-confidence untried shape:
---      addJob(task, subject:RootObjectBase, shift, addDontClear, location)
---   B. The CallbacksReference.md dispatcher shape with the UNFIXED raw hand
---      (kept from the original probe, now second priority instead of first):
---      addJob(task, subject:hand, shift, addDontClear, location)
+--   A. FOUND LIVE 2026-08-12, round 2 -- the FIRST live Phase 3 attempt used
+--      subject=RootObjectBase (the addGoal fix) and errored:
+--      "bad argument #2 to 'addJob' (KenshiLua.RootObject expected, got
+--      userdata)" -- addJob wants a DIFFERENT type than addGoal.
+--      RootObject and RootObjectBase are genuinely separate classes in
+--      BindingsReference.md (`## RootObject` at one header, `## RootObjectBase`
+--      at another), not the same type under two names. The `hand` class
+--      that already solved addGoal turns out to have BOTH unwrap methods
+--      sitting right next to each other: `getRootObjectBase()` (addGoal) AND
+--      `getRootObject()` (addJob's actual ask, per the error text). Highest
+--      confidence untried shape:
+--      addJob(task, subject:RootObject, shift, addDontClear, location)
+--   B. The CallbacksReference.md dispatcher shape with the raw hand
+--      (CONFIRMED WRONG live -- "RootObject expected, got userdata" --
+--      kept for completeness, not because it might work).
 --   C. The C++ AITaskSystem.h header (a plausible OTHER overload/wrapper
 --      layer): addJob(task, subject:hand, location, shift)
---   D. The BindingsReference.md doc (already known to be missing the
---      `subject` param entirely, kept only because "known wrong" still beats
---      "untried"): addJob(task, shift, addDontClear, location)
+--   D. The BindingsReference.md doc shape (CONFIRMED WRONG live --
+--      "RootObject expected, got boolean", the doc's missing `subject`
+--      param means some OTHER arg lands in that slot instead -- kept for
+--      completeness).
 -- Stops at the first variant that does not error. Each attempt is logged
 -- BEFORE it runs -- pcall does not catch a native access violation, so the
 -- log is the only thing that survives a crash and names the killer.
@@ -354,20 +357,20 @@ function Projector.testJobOrder(taskName)
     local okHand, selfHand = pcall(function() return c:getHandle() end)
     local subject = okHand and selfHand or nil
 
-    local okRoot, selfRoot = false, nil
+    local okRootObj, selfRootObj = false, nil
     if okHand and selfHand then
-        okRoot, selfRoot = pcall(function() return selfHand:getRootObjectBase() end)
+        okRootObj, selfRootObj = pcall(function() return selfHand:getRootObject() end)
     end
-    local rootSubject = okRoot and selfRoot or nil
+    local rootObjSubject = okRootObj and selfRootObj or nil
 
     local variants = {
-        { label = "A (dispatcher shape, subject=RootObjectBase unwrap -- try first, addGoal precedent)",
-          call = function() c:addJob(taskId, rootSubject, false, false, pos) end },
-        { label = "B (dispatcher shape, subject=raw hand -- original best guess, untried against actual type check)",
+        { label = "A (dispatcher shape, subject=RootObject unwrap -- try first, matches addJob's own error text)",
+          call = function() c:addJob(taskId, rootObjSubject, false, false, pos) end },
+        { label = "B (dispatcher shape, subject=raw hand -- CONFIRMED WRONG live, kept for completeness)",
           call = function() c:addJob(taskId, subject, false, false, pos) end },
         { label = "C (AITaskSystem.h header shape)",
           call = function() c:addJob(taskId, subject, pos, false) end },
-        { label = "D (BindingsReference.md doc shape -- known incomplete, kept for completeness)",
+        { label = "D (BindingsReference.md doc shape -- CONFIRMED WRONG live, kept for completeness)",
           call = function() c:addJob(taskId, false, false, pos) end },
     }
 
