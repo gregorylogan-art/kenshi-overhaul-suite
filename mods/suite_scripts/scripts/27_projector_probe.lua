@@ -54,17 +54,31 @@
 --      permanently buys one resolved question either way.
 --
 -- SAFETY: run phase 2/3 ONLY against a character you do not mind losing --
--- not the player, not a squad member you care about. Click a random,
--- disposable townsperson before calling these. Phase 0 is safe on anyone,
--- including the player, and is worth leaving running in the background
--- while you play normally.
+-- not the player, not a squad member you care about. Phase 0 is safe on
+-- anyone, including the player, and is worth leaving running in the
+-- background while you play normally.
+--
+-- 2026-08-12 CORRECTION -- "click a random disposable townsperson" (this
+-- section's original advice) does NOT work the way it sounds. getSelectedCharacter()
+-- reads PlayerInterface.selectedCharacter, Kenshi's SQUAD ROSTER selection --
+-- clicking an arbitrary world NPC does not set it, only selecting one of the
+-- player's OWN characters does. Every test run through getSelectedCharacter()
+-- targets a squad member, always, no matter what you click on (a tamed
+-- animal counts as squad too). There is no known getter for "the NPC I'm
+-- currently looking at." Instead: Phase 0's notification hooks receive a
+-- live `character` for ANY character the game's own AI acts on, squad or
+-- not. startObserve() now stashes the most recent one
+-- (Projector.lastObserved() to check who) -- pass `true` as testGoal/
+-- testJobOrder's second argument to target THAT character instead of
+-- getSelectedCharacter(), for a genuinely independent NPC.
 --
 --   dofile("mods/KenshiLua/scripts/27_projector_probe.lua")
 --   Projector.startObserve()      -- phase 0, always safe, runs in the background
+--   Projector.lastObserved()      -- check who Phase 0 most recently captured
 --   Projector.stopObserve()       -- turn phase 0 back off
 --   Projector.testRead()          -- phase 1, always safe, any character
---   Projector.testGoal("IDLE")    -- phase 2, select a DISPOSABLE NPC first
---   Projector.testJobOrder("WANDERER")  -- phase 3, HIGHEST RISK, disposable NPC first
+--   Projector.testGoal("IDLE", true)          -- phase 2, true = target Phase 0's capture
+--   Projector.testJobOrder("WANDERER", true)  -- phase 3, HIGHEST RISK, true = target the capture
 -- ============================================================================
 
 local TAG = "[PROJECTOR-PROBE] "
@@ -184,19 +198,42 @@ function Projector.startObserve()
         return ok and n or "?"
     end
 
+    -- CAPTURE. FOUND LIVE 2026-08-12: getSelectedCharacter() reads
+    -- PlayerInterface.selectedCharacter, which is Kenshi's SQUAD ROSTER
+    -- selection, not a world click-target -- clicking a random townsperson
+    -- does not set it, only selecting one of the player's OWN characters
+    -- does (BindingsReference.md line ~7237: `selectedCharacter | hand |
+    -- RW`, a PlayerInterface property). Every Phase 1/2/3 test run through
+    -- getSelectedCharacter() so far -- Dreadnaut, Jakku, even the "bonedog"
+    -- -- was therefore very likely still a squad member (a tamed animal
+    -- counts as squad), not a genuinely independent NPC; the control-
+    -- authority question was never actually settled. Phase 0's notification
+    -- hooks receive a live `character` argument for ANY character the
+    -- game's own AI acts on, squad or not -- stash the most recent one so
+    -- testGoal/testJobOrder can target a real independent NPC by passing
+    -- true as their second argument, no squad selection required.
+    Projector._lastObserved = Projector._lastObserved or nil
+    local function captureLastObserved(character)
+        local ok, n = pcall(function() return character:getName() end)
+        Projector._lastObserved = { character = character, name = ok and n or "?" }
+    end
+
     local h1 = registerHandler("onCharacterAddJob", function(character, taskType, subject, shift, addDontClear, location)
+        captureLastObserved(character)
         rateLimited("addJob", function()
             return ("OBSERVED addJob: %s <- task %s  shift=%s addDontClear=%s")
                 :format(nameOf(character), taskLabel(taskType), tostring(shift), tostring(addDontClear))
         end)
     end)
     local h2 = registerHandler("onCharacterAddOrder", function(character, destBuilding, taskType, subject, shift, clear, location)
+        captureLastObserved(character)
         rateLimited("addOrder", function()
             return ("OBSERVED addOrder: %s <- task %s  shift=%s clear=%s")
                 :format(nameOf(character), taskLabel(taskType), tostring(shift), tostring(clear))
         end)
     end)
     local h3 = registerHandler("onCharacterRemoveJob", function(character, taskType)
+        captureLastObserved(character)
         rateLimited("removeJob", function()
             return ("OBSERVED removeJob: %s -x- task %s"):format(nameOf(character), taskLabel(taskType))
         end)
@@ -206,6 +243,19 @@ function Projector.startObserve()
     end
     log(("observing -- %d hook(s) armed. Go watch a farmer, a guard, anyone with a job. Every"):format(#Projector._handlers))
     log("addJob/addOrder/removeJob the game's own AI performs will print here, with real task ids.")
+end
+
+-- Projector.lastObserved() -- print who Phase 0 most recently captured, so
+-- you can confirm it is a real independent NPC (not one of your own squad)
+-- before running testGoal(taskName, true) / testJobOrder(taskName, true)
+-- against them.
+function Projector.lastObserved()
+    if not Projector._lastObserved then
+        log("nothing captured yet -- Phase 0 must be running (Projector.startObserve()) and the")
+        log("game's own AI must have assigned a job/order to SOMEONE since it started")
+        return
+    end
+    log("last observed: " .. tostring(Projector._lastObserved.name))
 end
 
 function Projector.stopObserve()
@@ -270,13 +320,37 @@ end
 --      engine actually asked for, traced from the BindingsReference.md
 --      `hand` class -- highest confidence of the three).
 -- ---------------------------------------------------------------------------
-function Projector.testGoal(taskName)
+-- Shared by testGoal/testJobOrder. useCaptured=true targets whoever Phase 0
+-- most recently observed getting a real job/order (a genuinely independent
+-- NPC, squad or not -- see the capture note above startObserve()); omitted
+-- or false falls back to getSelectedCharacter(), which -- FOUND LIVE
+-- 2026-08-12 -- can ONLY ever return one of the player's own squad, never
+-- an arbitrary world NPC, regardless of what you click on.
+local function resolveTestTarget(useCaptured)
+    if useCaptured then
+        if not (Projector._lastObserved and Projector._lastObserved.character) then
+            log("no captured character yet -- run Projector.startObserve() and wait for the")
+            log("game's own AI to assign SOMEONE a job, or check Projector.lastObserved()")
+            return nil
+        end
+        return Projector._lastObserved.character
+    end
+    local ok, c = pcall(function() return getSelectedCharacter() end)
+    if not ok or not c then
+        log("select a character first (this will be one of YOUR squad -- pass true as the")
+        log("second argument instead to target Phase 0's last captured independent NPC)")
+        return nil
+    end
+    return c
+end
+
+function Projector.testGoal(taskName, useCaptured)
     taskName = taskName or "IDLE"
     local taskId = Projector.TASK[taskName]
     if not taskId then log("unknown task: " .. tostring(taskName)) return end
 
-    local ok, c = pcall(function() return getSelectedCharacter() end)
-    if not ok or not c then log("select a DISPOSABLE (non-player, non-squad) character first") return end
+    local c = resolveTestTarget(useCaptured)
+    if not c then return end
     local okN, name = pcall(function() return c:getName() end)
     log(("========== PROJECTOR PHASE 2: addGoal(%s=%d) on %s =========="):format(taskName, taskId, tostring(okN and name or "?")))
 
@@ -338,13 +412,13 @@ end
 -- BEFORE it runs -- pcall does not catch a native access violation, so the
 -- log is the only thing that survives a crash and names the killer.
 -- ---------------------------------------------------------------------------
-function Projector.testJobOrder(taskName)
+function Projector.testJobOrder(taskName, useCaptured)
     taskName = taskName or "WANDERER"
     local taskId = Projector.TASK[taskName]
     if not taskId then log("unknown task: " .. tostring(taskName)) return end
 
-    local ok, c = pcall(function() return getSelectedCharacter() end)
-    if not ok or not c then log("select a DISPOSABLE (non-player, non-squad) character first") return end
+    local c = resolveTestTarget(useCaptured)
+    if not c then return end
     local okN, name = pcall(function() return c:getName() end)
     log(("========== PROJECTOR PHASE 3: addJob/addOrder(%s=%d) on %s =========="):format(taskName, taskId, tostring(okN and name or "?")))
 
@@ -393,11 +467,16 @@ function Projector.testJobOrder(taskName)
 end
 
 log("27_projector_probe loaded.")
-log("  Projector.startObserve()           -- phase 0, always safe, any character, runs passively")
-log("  Projector.stopObserve()            -- turn phase 0 back off")
-log("  Projector.testRead()               -- phase 1, always safe, any character")
-log("  Projector.testGoal(taskName)       -- phase 2, select a DISPOSABLE character first")
-log("  Projector.testJobOrder(taskName)   -- phase 3, HIGHEST RISK, disposable character first")
-log("  task names: IDLE, WANDERER, MOVE_CUS_ORDERED, HOLD_POSITION, PATROL_TOWN, WANDER_TOWN,")
-log("              FOLLOW_PLAYER_ORDER, RECRUIT_AT_JOBCENTER, STAND_STILL, OPERATE_MACHINERY,")
-log("              DELIVER_RESOURCES, COLLECT_OUTPUT_RESOURCE, FIND_A_SHOP, SHOPPING, BUY_SHIT, JOB_BUILDER")
+log("  Projector.startObserve()               -- phase 0, always safe, any character, runs passively")
+log("  Projector.lastObserved()               -- who Phase 0 most recently captured (see below)")
+log("  Projector.stopObserve()                -- turn phase 0 back off")
+log("  Projector.testRead()                   -- phase 1, always safe, any character")
+log("  Projector.testGoal(taskName, true)      -- phase 2, true = target Phase 0's captured NPC")
+log("  Projector.testJobOrder(taskName, true)  -- phase 3, HIGHEST RISK, true = target the capture")
+log("CAUTION: getSelectedCharacter() (used when the 2nd arg above is omitted/false) is Kenshi's")
+log("SQUAD ROSTER selection, not a world click-target -- it can only ever return one of your own")
+log("characters, no matter what you click on. Pass true to target Phase 0's captured character")
+log("instead for a genuinely independent NPC.")
+log("task names: IDLE, WANDERER, MOVE_CUS_ORDERED, HOLD_POSITION, PATROL_TOWN, WANDER_TOWN,")
+log("            FOLLOW_PLAYER_ORDER, RECRUIT_AT_JOBCENTER, STAND_STILL, OPERATE_MACHINERY,")
+log("            DELIVER_RESOURCES, COLLECT_OUTPUT_RESOURCE, FIND_A_SHOP, SHOPPING, BUY_SHIT, JOB_BUILDER")
