@@ -311,15 +311,24 @@ function Projector.testGoal(taskName)
 end
 
 -- ---------------------------------------------------------------------------
--- PHASE 3 -- addJob / addOrder. HIGHEST RISK. Three variants, best evidence
+-- PHASE 3 -- addJob / addOrder. HIGHEST RISK. Four variants, best evidence
 -- first:
---   A. The CallbacksReference.md dispatcher shape (highest confidence --
---      read directly off the compiled hook's own C++ signature, not a doc
---      that has been wrong 29+ times elsewhere):
---      addJob(task, subject, shift, addDontClear, location)
---   B. The C++ AITaskSystem.h header (a plausible OTHER overload/wrapper
+--   A. FOUND LIVE 2026-08-12 (addGoal precedent) -- the CallbacksReference.md
+--      dispatcher shape, but with `subject` unwrapped the same way that
+--      fixed addGoal: Character:getHandle() -> hand -> hand:getRootObjectBase()
+--      -> RootObjectBase. addGoal's raw `hand` errored "RootObjectBase
+--      expected, got userdata"; the ORIGINAL variant B below passes that same
+--      raw hand into addJob and has never actually been confirmed to accept
+--      it -- if addJob wants RootObjectBase too (both dispatcher signatures
+--      name a `subject`/`RootObject*` argument, plausibly the same family),
+--      this is the highest-confidence untried shape:
+--      addJob(task, subject:RootObjectBase, shift, addDontClear, location)
+--   B. The CallbacksReference.md dispatcher shape with the UNFIXED raw hand
+--      (kept from the original probe, now second priority instead of first):
+--      addJob(task, subject:hand, shift, addDontClear, location)
+--   C. The C++ AITaskSystem.h header (a plausible OTHER overload/wrapper
 --      layer): addJob(task, subject:hand, location, shift)
---   C. The BindingsReference.md doc (already known to be missing the
+--   D. The BindingsReference.md doc (already known to be missing the
 --      `subject` param entirely, kept only because "known wrong" still beats
 --      "untried"): addJob(task, shift, addDontClear, location)
 -- Stops at the first variant that does not error. Each attempt is logged
@@ -345,12 +354,20 @@ function Projector.testJobOrder(taskName)
     local okHand, selfHand = pcall(function() return c:getHandle() end)
     local subject = okHand and selfHand or nil
 
+    local okRoot, selfRoot = false, nil
+    if okHand and selfHand then
+        okRoot, selfRoot = pcall(function() return selfHand:getRootObjectBase() end)
+    end
+    local rootSubject = okRoot and selfRoot or nil
+
     local variants = {
-        { label = "A (CallbacksReference dispatcher shape -- try first, best evidence)",
+        { label = "A (dispatcher shape, subject=RootObjectBase unwrap -- try first, addGoal precedent)",
+          call = function() c:addJob(taskId, rootSubject, false, false, pos) end },
+        { label = "B (dispatcher shape, subject=raw hand -- original best guess, untried against actual type check)",
           call = function() c:addJob(taskId, subject, false, false, pos) end },
-        { label = "B (AITaskSystem.h header shape)",
+        { label = "C (AITaskSystem.h header shape)",
           call = function() c:addJob(taskId, subject, pos, false) end },
-        { label = "C (BindingsReference.md doc shape -- known incomplete, kept for completeness)",
+        { label = "D (BindingsReference.md doc shape -- known incomplete, kept for completeness)",
           call = function() c:addJob(taskId, false, false, pos) end },
     }
 
