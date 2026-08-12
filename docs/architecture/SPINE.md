@@ -367,6 +367,21 @@ wrong for `addGoal`. Fixed in `27_projector_probe.lua` (`f3458e1`): a new
 Variant A tries the `RootObjectBase` unwrap first, ahead of the three
 original variants (now B/C/D).
 
+**Live Phase 3 test, 2026-08-12 — `addJob` wants `RootObject`, NOT
+`RootObjectBase`.** The two are genuinely separate classes in
+`BindingsReference.md`, not the same type under two names. Error text was
+unambiguous: `"bad argument #2 to 'addJob' (KenshiLua.RootObject expected,
+got userdata)"` for both the raw-hand and `RootObjectBase`-unwrap attempts;
+the doc-shape variant (which puts `false` in that slot) errored `"expected,
+got boolean"` — same slot, same required type, regardless of shape. Fix
+(`61bc259`): `hand` has `getRootObject()` sitting right next to the
+`getRootObjectBase()` that solved `addGoal` — Variant A now uses the correct
+one. **Process note:** this test initially ran against a STALE in-memory
+copy of the probe script (Kenshi wasn't re-`dofile`'d after the latest
+deploy) — the log's own variant labels gave it away (old wording, not the
+newly-edited text), which is why label text doubles as a version check, not
+just documentation.
+
 ## Danger list — never call these
 
 | Pattern | Why |
