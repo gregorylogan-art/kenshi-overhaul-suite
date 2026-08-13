@@ -101,6 +101,17 @@ Projector._handlers = {}
 -- in the whole enum: a character told to idle or wander is close to
 -- indistinguishable from doing nothing, which is exactly what you want for
 -- a first live test of a call that might not even work as documented.
+-- AUTO_LABOURING_MINES and OPERATE_STORAGE added 2026-08-12 for #39's
+-- native-auto-fish investigation: AUTO_LABOURING_MINES is vanilla's own
+-- REPEATING resource-extraction task (what slave/worker AI uses for auto-
+-- mining) -- the structurally closest existing analog to a fishing loop,
+-- though likely scoped to BuildingFunction.BF_MINE-flagged terrain rather
+-- than freely usable anywhere (untested). OPERATE_STORAGE is the #24
+-- docks/storage angle. Both are HIGHER RISK than IDLE/WANDERER (a
+-- repeating task, not a one-shot) -- test solo via testJobOrder(name, true)
+-- against a captured independent NPC, not testGoal(), and expect it may
+-- need to be tried near/inside a real matching building before it does
+-- anything (or errors informatively if it requires one).
 Projector.TASK = {
     NULL_TASK               = 0,
     IDLE                    = 14,
@@ -115,10 +126,12 @@ Projector.TASK = {
     OPERATE_MACHINERY       = 87,
     DELIVER_RESOURCES       = 88,
     COLLECT_OUTPUT_RESOURCE = 92,
+    OPERATE_STORAGE         = 124,
     FIND_A_SHOP             = 117,
     SHOPPING                = 118,
     BUY_SHIT                = 119,
     JOB_BUILDER             = 125,
+    AUTO_LABOURING_MINES    = 189,
 }
 
 -- Reverse lookup (id -> name) so the observer can print a human-readable
@@ -479,4 +492,5 @@ log("characters, no matter what you click on. Pass true to target Phase 0's capt
 log("instead for a genuinely independent NPC.")
 log("task names: IDLE, WANDERER, MOVE_CUS_ORDERED, HOLD_POSITION, PATROL_TOWN, WANDER_TOWN,")
 log("            FOLLOW_PLAYER_ORDER, RECRUIT_AT_JOBCENTER, STAND_STILL, OPERATE_MACHINERY,")
-log("            DELIVER_RESOURCES, COLLECT_OUTPUT_RESOURCE, FIND_A_SHOP, SHOPPING, BUY_SHIT, JOB_BUILDER")
+log("            DELIVER_RESOURCES, COLLECT_OUTPUT_RESOURCE, OPERATE_STORAGE, FIND_A_SHOP, SHOPPING,")
+log("            BUY_SHIT, JOB_BUILDER, AUTO_LABOURING_MINES (repeating task, higher risk -- #39)")
