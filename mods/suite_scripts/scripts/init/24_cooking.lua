@@ -61,10 +61,12 @@ local CFG = {
     burnAtMax   = 0.05,
     maxSkill    = 100,
 
-    -- Cooking XP is disabled until the stat id is MEASURED. Guessing an id and
-    -- writing to it is how you silently train the wrong skill.
-    cookingStatId = nil,
-    xpPerCook     = 0.5,
+    -- Cooking XP grants through Skills.grant(character, "cooking", amount),
+    -- which is a no-op until Skills.register("cooking", id, measuredBy) has
+    -- actually run (09_skills.lua refuses an unevidenced id) -- so XP simply
+    -- does not flow until the stat id is MEASURED, with no separate flag
+    -- needed here to track that state a second time.
+    xpPerCook = 0.5,
 }
 
 -- ---------------------------------------------------------------------------
@@ -173,10 +175,21 @@ function Cooking.cook(character, n, ownerKeyOverride)
         end
     end
 
-    -- XP stays off until the Cooking stat id is measured rather than guessed.
-    if CFG.cookingStatId and Fishing and Fishing.grantStatXp then
-        pcall(Fishing.grantStatXp, character, CFG.cookingStatId,
-              CFG.xpPerCook * (cooked + burnt))
+    -- FOUND 2026-08-12 (static review, not yet hit live): this called
+    -- Fishing.grantStatXp, which never existed anywhere in this repo --
+    -- Fishing only ever defined grantXp(character), a different shape (all 4
+    -- fishing stats at once, no stat-id/amount args). Harmless today only
+    -- because cookingStatId was always nil, so the `and` short-circuited
+    -- before the missing-function reference was ever indexed -- but the
+    -- moment someone measured Cooking's real stat id and set it, this would
+    -- have silently granted nothing, the exact "sat inert for a whole
+    -- session" shape this project has already been burned by twice
+    -- (fishing's own skill model, and Fishing.grantXp being nil across the
+    -- old per-script sandbox split). Skills.grant already refuses to act on
+    -- an unregistered key, so it is the correct gate on its own -- no
+    -- separate cookingStatId flag needed to track the same fact twice.
+    if Skills and Skills.grant then
+        pcall(Skills.grant, character, "cooking", CFG.xpPerCook * (cooked + burnt))
     end
 
     log(("%s: cooked %d, burnt %d (burn chance %.0f%% at skill %.1f)")

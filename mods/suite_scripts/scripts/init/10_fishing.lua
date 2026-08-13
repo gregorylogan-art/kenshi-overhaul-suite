@@ -1567,7 +1567,6 @@ function Fishing.collect()
     if not ok or not c then log("collect: select a character first") return end
     local okN, name = pcall(function() return c:getName() end)
     name = (okN and name) or "?"
-    local s = stateFor(name)
 
     -- DELEGATED to the shared layer. Items.collect owns the mint, the
     -- fail-closed room check, and stopping at the first refusal with the
