@@ -451,6 +451,37 @@ first actual path to a genuinely independent-NPC test in this whole
 investigation. Not yet exercised live — next retest should use it to
 finally settle the squad-authority question cleanly.
 
+## SPAWN-OWNED NPCs — a second, different path (proposed by Greg, 2026-08-12)
+
+Rather than keep working around vanilla's selection system for existing
+NPCs, spawn characters we hold a direct Lua reference to from the moment
+they exist — the reference comes straight from the factory call's return
+value, so `getSelectedCharacter()`'s squad-only limitation never applies to
+them at all. `RootObjectFactory:createRandomCharacter(position, age)` and
+`:createRandomSquad(...)` are real bound methods (`BindingsReference.md`'s
+`## RootObjectFactory` section) — the same machinery vanilla itself uses to
+populate the world with wandering NPCs, traders, and bandit squads, not a
+hack or an internals write.
+
+**One path explicitly ruled out, do not attempt it:**
+`PlayerInterface.playerCharacters` (the squad roster) is typed
+`lektor<Character*>` — exactly the container class this file's own Danger
+List already confirms hard-crashes the game (×2, see below). Writing a
+spawned character directly into that field to "add them to the roster" is
+that same class of raw internal-container write. `createRandomSquad`'s
+`permanentsquad` argument is the bound-method alternative for anything that
+needs squad-like persistence.
+
+**Ready for the next session:** `30_spawn_probe.lua` (`41ac993`) — three
+risk-ordered phases (capability check, spawn one, read back), same
+log-as-cursor/pcall discipline as the Projector probe. Nothing run live
+yet. Open questions this will answer: does `createRandomCharacter`'s
+`RootObject` return type need an unwrap before `getName()`/`getPosition()`
+work (same shape as `hand:getRootObject()`/`getRootObjectBase()`), does the
+spawned character respond to `addJob`/`addGoal` the same way an existing
+one does, and — separately, not yet researched — how a spawned character
+gets removed again if that's ever needed.
+
 ## Danger list — never call these
 
 | Pattern | Why |
