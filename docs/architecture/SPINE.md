@@ -389,28 +389,41 @@ deploy) — the log's own variant labels gave it away (old wording, not the
 newly-edited text), which is why label text doubles as a version check, not
 just documentation.
 
-**MILESTONE, 2026-08-12 — first confirmed behavioral effect from any
-Projector write call.** Retested with the fix live: `addJob(24=WANDERER,
-subject:RootObject, false, false, pos)` via corrected Variant A returned
-clean (zero error, zero crash, dump timestamp unchanged) — AND this time
-something real happened. The character (sitting) was interrupted, stood up,
-and talked. A genuine state transition, not a hitch or silence. This is
-qualitatively different from every `addGoal` result above: across three
-targets and two tasks, `addGoal` never once interrupted existing behavior;
-`addJob` did, on the first clean attempt with the right subject type. Real
-evidence `addJob` carries command authority `addGoal` does not.
+**RETRACTED, 2026-08-12 — the "first confirmed behavioral effect" claim
+below was overclaimed.** Original entry: `addJob(24=WANDERER,
+subject:RootObject, false, false, pos)` returned clean (zero error, zero
+crash, dump timestamp unchanged), and the target character (sitting) stood
+up and talked to another character shortly after. That much is real. What
+was NOT justified is calling it a confirmed behavioral EFFECT of the call.
+Greg's own correction: Kenshi characters stand up and talk to each other
+constantly as ordinary background AI, with no script involved at all — no
+control was ever run to rule out coincidental timing (the call landing in
+the same few seconds the character was already about to do that on its
+own), and there is no way to retroactively establish causation from a
+single uncontrolled observation. This is a real methodological gap, not
+excess caution: a genuine test needs either a task whose effect is
+unambiguous at a glance (a character walking somewhere they otherwise never
+would, not "stood up," which is common background behavior) or a repeated-
+trial comparison against a baseline of untouched characters.
 
-Same caveat as the earlier `addGoal` retests applies here too: this was on
-Dreadnaut (Greg's own squad member), not a fully independent NPC, so the
-squad-authority question isn't settled — worth one more retest on a truly
-independent target (the bonedog shape) to fully close it out. The specific
-resulting behavior (talking, not literally walking to a WANDERER
-destination) most likely means the call broke the character out of its
-sitting state and its own AI then picked the next action, rather than the
-engine obeying the WANDERER destination directly — plausible, not proven.
-Either way, this answers the probe's original headline question in the
-affirmative for the first time: **Lua can drive a character through a real,
-observable behavior change via `addJob`.**
+**Still true, unaffected by the retraction:** the call itself returns
+clean, zero error, zero crash, and does so reliably (~10+ calls across this
+session). The `RootObject`/`RootObjectBase` signature distinction is a real
+static finding, independent of any behavioral claim. What is NOT
+established: whether `addJob`/`addGoal` produce ANY observable effect at
+all, on any target tried so far. The probe's original headline question
+(can Lua actually drive a character through a job) is back to open, not
+answered.
+
+**Squad-vs-independent NPC targeting remains unsolved for a different
+reason than "worth another retest".** Greg: NPCs can be toggled/clicked but
+are not truly *selectable* the way squad members are —
+`getSelectedCharacter()` structurally can only ever return one of the
+player's own characters (confirmed below), and clicking a stranger in the
+world does not change that. The Phase 0 capture mechanism
+(`Projector.lastObserved()`) is the only currently-known way to get a live
+reference to a non-squad NPC at all, and it has not yet been exercised for
+a real test.
 
 ## FOUND LIVE 2026-08-12: getSelectedCharacter() can only ever return squad
 
