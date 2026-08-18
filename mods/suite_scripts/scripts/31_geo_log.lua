@@ -13,25 +13,29 @@
 -- world -- it cannot fail the way those calls can, and needs no pcall-wrapped
 -- log-as-cursor discipline because there is no risky call to bracket.
 --
--- TOUR WORKFLOW
---   At each town (major or minor), close enough to see it but not
---   necessarily inside it -- a rough position is all the site table needs,
---   getting mauled by hostile guards to shave off a few metres of accuracy
---   is not worth it:
---     Geo.mark("Squin", "major", "farming, western hivers allied")
---     Geo.mark("Some Satellite Town", "minor", "near Squin, looked like ore")
---   category is a free string -- "major"/"minor" is a natural fit but use
---   whatever reads clearly; it is never validated or gated.
---   note is freeform -- faction, hostility, what the terrain looked like,
---   anything worth remembering later. Optional.
+-- TOUR WORKFLOW -- FOUND LIVE 2026-08-18: the first version required typing
+-- a name/category/note into the call itself, which meant hand-editing Lua
+-- syntax at every single stop -- real friction for anyone not fluent in it,
+-- and it produced a genuine error when tried without the required name arg.
+-- Redesigned around what Greg actually asked for: ONE command, identical
+-- every time, nothing to edit, ever:
+--
+--     Geo.mark()
+--
+-- Run that exact line at every town, major or minor, close enough to see it
+-- but not necessarily inside it -- a rough position is all the site table
+-- needs. It prints "MARK #N" plus the position and does nothing else.
+-- Afterward, just say in chat, in order, what each numbered mark was --
+-- "1 was my house, 2 was the first western hiver town, 3 was..." -- that
+-- narration is the label; the tool no longer needs one.
 --
 --   Geo.list()   -- print everything captured so far, one line per mark
 --   Geo.count()  -- how many marks exist right now
 --   Geo.clear()  -- wipe and start over (rarely needed)
 --
 -- After the tour: python tools/readlog.py --tag GEO pulls every captured
--- line back out in one place, ready to fold into NPC_ECONOMY.md's site
--- table.
+-- line back out in one place, matched up against the chat narration to
+-- build NPC_ECONOMY.md's site table.
 -- ============================================================================
 
 local TAG = "[GEO] "
@@ -52,12 +56,10 @@ local function readPos(character)
     return { x = x, y = y or 0, z = z }
 end
 
--- Geo.mark("Squin", "major", "farming, western hivers allied")
-function Geo.mark(name, category, note)
-    if type(name) ~= "string" or name == "" then
-        log("give it a name: Geo.mark(\"Town Name\", \"major\"|\"minor\", \"optional note\")")
-        return nil
-    end
+-- Geo.mark() -- zero arguments, always. Nothing to type, nothing to get
+-- wrong. Run the exact same line at every stop; tell me what each numbered
+-- mark was afterward, in chat, in order.
+function Geo.mark()
     local ok, c = pcall(function() return getSelectedCharacter() end)
     if not ok or not c then
         log("select a character first (position is read from whoever is selected)")
@@ -69,17 +71,10 @@ function Geo.mark(name, category, note)
         return nil
     end
 
-    local entry = {
-        name = name,
-        category = (type(category) == "string" and category ~= "") and category or "?",
-        note = (type(note) == "string") and note or "",
-        x = pos.x, y = pos.y, z = pos.z,
-    }
+    local entry = { x = pos.x, y = pos.y, z = pos.z }
     Geo.marks[#Geo.marks + 1] = entry
 
-    log(("MARK #%d  %-28s [%s]  x=%.1f y=%.1f z=%.1f%s")
-        :format(#Geo.marks, entry.name, entry.category, entry.x, entry.y, entry.z,
-                entry.note ~= "" and ("  -- " .. entry.note) or ""))
+    log(("MARK #%d  x=%.1f y=%.1f z=%.1f"):format(#Geo.marks, entry.x, entry.y, entry.z))
     return entry
 end
 
@@ -90,14 +85,12 @@ end
 
 function Geo.list()
     if #Geo.marks == 0 then
-        log("nothing captured yet -- Geo.mark(\"Town Name\", \"major\"|\"minor\", \"note\")")
+        log("nothing captured yet -- Geo.mark() at each stop")
         return
     end
     log(("=== %d mark(s) ==="):format(#Geo.marks))
     for i, e in ipairs(Geo.marks) do
-        log(("%3d  %-28s [%s]  x=%.1f y=%.1f z=%.1f%s")
-            :format(i, e.name, e.category, e.x, e.y, e.z,
-                    e.note ~= "" and ("  -- " .. e.note) or ""))
+        log(("%3d  x=%.1f y=%.1f z=%.1f"):format(i, e.x, e.y, e.z))
     end
     log("=== end ===")
 end
@@ -108,5 +101,5 @@ function Geo.clear()
     log(("cleared %d mark(s)"):format(n))
 end
 
-log("31_geo_log loaded -- Geo.mark(name, category, note) / .list() / .count() / .clear()")
+log("31_geo_log loaded -- Geo.mark() (same exact command every stop) / .list() / .count() / .clear()")
 log("read-only, zero world-state writes -- safe at every town regardless of hostility")
